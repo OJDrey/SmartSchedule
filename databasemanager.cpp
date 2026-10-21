@@ -1,5 +1,27 @@
 #include "databasemanager.h"
 
+namespace {
+const char *tableOf(Entity entity)
+{
+    switch (entity) {
+    case Entity::Group: return "groups";
+    case Entity::Teacher: return "teachers";
+    case Entity::Classroom: return "classrooms";
+    default: return "subjects";
+    }
+}
+
+const char *scheduleColumnOf(Entity entity)
+{
+    switch (entity) {
+    case Entity::Group: return "group_id";
+    case Entity::Teacher: return "teacher_id";
+    case Entity::Classroom: return "classroom_id";
+    default: return "subject_id";
+    }
+}
+}
+
 DatabaseManager& DatabaseManager::instance() {
     static DatabaseManager instance;
     return instance;
@@ -9,94 +31,67 @@ DatabaseManager::~DatabaseManager() {
     closeDatabase();
 }
 
-bool DatabaseManager::connectToDatabase(const QString &dbName) {
+bool DatabaseManager::connectToDatabase(const QString &dbPath) {
     m_db = QSqlDatabase::addDatabase("QSQLITE");
-    m_db.setDatabaseName(dbName);
+    m_db.setDatabaseName(dbPath);
 
     if (!m_db.open()) {
         qDebug() << "Помилка відкриття БД:" << m_db.lastError().text();
         return false;
     }
 
-    qDebug() << "БД успішно відкрита:" << dbName;
-    if (createTables()) {
-        seedInitialData();
-        return true;
-    }
-    return false;
+    QSqlQuery(m_db).exec("PRAGMA foreign_keys = ON;");
+    return createTables() && seedInitialData();
 }
 
 void DatabaseManager::closeDatabase() {
-    if (m_db.isOpen()) {
-        m_db.close();
-    }
+    if (!m_db.isValid()) return;
+    const QString connection = m_db.connectionName();
+    if (m_db.isOpen()) m_db.close();
+    m_db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connection);
 }
 
 bool DatabaseManager::createTables() {
-    QSqlQuery query;
-
-    QString createGroupsTable = R"(
-        CREATE TABLE IF NOT EXISTS groups (
+    const QStringList statements = {
+        R"(CREATE TABLE IF NOT EXISTS groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-        );
-    )";
-
-    QString createTeachersTable = R"(
-        CREATE TABLE IF NOT EXISTS teachers (
+            name TEXT NOT NULL UNIQUE);)",
+        R"(CREATE TABLE IF NOT EXISTS teachers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             full_name TEXT NOT NULL,
-            department TEXT
-        );
-    )";
-
-    QString createRoomsTable = R"(
-        CREATE TABLE IF NOT EXISTS classrooms (
+            department TEXT);)",
+        R"(CREATE TABLE IF NOT EXISTS classrooms (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             room_number TEXT NOT NULL UNIQUE,
-            capacity INTEGER DEFAULT 30
-        );
-    )";
-
-    QString createSubjectsTable = R"(
-        CREATE TABLE IF NOT EXISTS subjects (
+            capacity INTEGER DEFAULT 30);)",
+        R"(CREATE TABLE IF NOT EXISTS subjects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            color_hex TEXT DEFAULT '#4CAF50'
-        );
-    )";
-
-    QString createBellsTable = R"(
-        CREATE TABLE IF NOT EXISTS bells (
+            color_hex TEXT DEFAULT '#4CAF50');)",
+        R"(CREATE TABLE IF NOT EXISTS bells (
             pair_number INTEGER PRIMARY KEY,
             start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL
-        );
-    )";
-
-    QString createScheduleTable = R"(
-        CREATE TABLE IF NOT EXISTS schedule (
+            end_time TEXT NOT NULL);)",
+        R"(CREATE TABLE IF NOT EXISTS schedule (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             subject_id INTEGER NOT NULL,
             teacher_id INTEGER NOT NULL,
             classroom_id INTEGER NOT NULL,
-            day_of_week INTEGER NOT NULL,
-            pair_number INTEGER NOT NULL,
-            week_type INTEGER DEFAULT 0,
+            day_of_week INTEGER NOT NULL CHECK(day_of_week BETWEEN 1 AND 5),
+            pair_number INTEGER NOT NULL CHECK(pair_number > 0),
+            week_type INTEGER NOT NULL DEFAULT 0 CHECK(week_type BETWEEN 0 AND 4),
             FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
             FOREIGN KEY(subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
             FOREIGN KEY(teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
-            FOREIGN KEY(classroom_id) REFERENCES classrooms(id) ON DELETE CASCADE
-        );
-    )";
-
-    QList<QString> tables = {
-        createGroupsTable, createTeachersTable, createRoomsTable,
-        createSubjectsTable, createBellsTable, createScheduleTable
+            FOREIGN KEY(classroom_id) REFERENCES classrooms(id) ON DELETE CASCADE);)",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_slot ON schedule(day_of_week, pair_number);",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_group ON schedule(group_id);"
     };
 
-    for (const QString &sql : tables) {
+    QSqlQuery query(m_db);
+    for (const QString &sql : statements) {
         if (!query.exec(sql)) {
             qDebug() << "Помилка створення таблиці:" << query.lastError().text();
             return false;
@@ -105,30 +100,41 @@ bool DatabaseManager::createTables() {
     return true;
 }
 
-void DatabaseManager::seedInitialData() {
-    QSqlQuery query;
+bool DatabaseManager::seedInitialData() {
+    QSqlQuery query(m_db);
+    m_db.transaction();
+
     query.exec("SELECT COUNT(*) FROM groups;");
     if (query.next() && query.value(0).toInt() == 0) {
-        query.exec("INSERT INTO groups (name) VALUES ('КІ-106'), ('КН-223'), ('КІ-405');");
-        query.exec("INSERT INTO teachers (full_name, department) VALUES ('Марцюк О. В.', 'Системного програмування'), ('Геник М. С.', 'Інформатики');");
-        query.exec("INSERT INTO classrooms (room_number, capacity) VALUES ('201', 30), ('204', 40), ('312', 25);");
-        query.exec("INSERT INTO subjects (name, color_hex) VALUES ('Системне програмування', '#4CAF50'), ('Основи C++', '#2196F3'), ('Бази даних', '#FF9800');");
+        const QStringList seed = {
+            "INSERT INTO groups (name) VALUES ('КІ-106'), ('КН-223'), ('КІ-405');",
+            "INSERT INTO teachers (full_name, department) VALUES ('Марцюк О. В.', 'Системного програмування'), ('Геник М. С.', 'Інформатики');",
+            "INSERT INTO classrooms (room_number, capacity) VALUES ('201', 30), ('204', 40), ('312', 25);",
+            "INSERT INTO subjects (name, color_hex) VALUES ('Системне програмування', '#4CAF50'), ('Основи C++', '#2196F3'), ('Бази даних', '#FF9800');"
+        };
+        for (const QString &sql : seed) {
+            if (!query.exec(sql)) {
+                m_db.rollback();
+                return false;
+            }
+        }
     }
 
     query.exec("SELECT COUNT(*) FROM bells;");
     if (query.next() && query.value(0).toInt() == 0) {
-        query.exec("INSERT INTO bells (pair_number, start_time, end_time) VALUES "
-                   "(1, '08:30', '09:50'), "
-                   "(2, '10:10', '11:30'), "
-                   "(3, '11:50', '13:10'), "
-                   "(4, '13:30', '14:50'), "
-                   "(5, '15:05', '16:25');");
+        if (!query.exec("INSERT INTO bells (pair_number, start_time, end_time) VALUES "
+                        "(1, '08:30', '09:50'), (2, '10:10', '11:30'), (3, '11:50', '13:10'), "
+                        "(4, '13:30', '14:50'), (5, '15:05', '16:25');")) {
+            m_db.rollback();
+            return false;
+        }
     }
+    return m_db.commit();
 }
 
 QList<GroupItem> DatabaseManager::getGroups() {
     QList<GroupItem> list;
-    QSqlQuery query("SELECT id, name FROM groups ORDER BY name;");
+    QSqlQuery query("SELECT id, name FROM groups ORDER BY name;", m_db);
     while (query.next()) {
         list.append({query.value(0).toInt(), query.value(1).toString()});
     }
@@ -137,7 +143,7 @@ QList<GroupItem> DatabaseManager::getGroups() {
 
 QList<TeacherItem> DatabaseManager::getTeachers() {
     QList<TeacherItem> list;
-    QSqlQuery query("SELECT id, full_name, department FROM teachers ORDER BY full_name;");
+    QSqlQuery query("SELECT id, full_name, department FROM teachers ORDER BY full_name;", m_db);
     while (query.next()) {
         list.append({query.value(0).toInt(), query.value(1).toString(), query.value(2).toString()});
     }
@@ -146,7 +152,7 @@ QList<TeacherItem> DatabaseManager::getTeachers() {
 
 QList<ClassroomItem> DatabaseManager::getClassrooms() {
     QList<ClassroomItem> list;
-    QSqlQuery query("SELECT id, room_number, capacity FROM classrooms ORDER BY room_number;");
+    QSqlQuery query("SELECT id, room_number, capacity FROM classrooms ORDER BY room_number;", m_db);
     while (query.next()) {
         list.append({query.value(0).toInt(), query.value(1).toString(), query.value(2).toInt()});
     }
@@ -155,7 +161,7 @@ QList<ClassroomItem> DatabaseManager::getClassrooms() {
 
 QList<SubjectItem> DatabaseManager::getSubjects() {
     QList<SubjectItem> list;
-    QSqlQuery query("SELECT id, name, color_hex FROM subjects ORDER BY name;");
+    QSqlQuery query("SELECT id, name, color_hex FROM subjects ORDER BY name;", m_db);
     while (query.next()) {
         list.append({query.value(0).toInt(), query.value(1).toString(), query.value(2).toString()});
     }
@@ -164,74 +170,205 @@ QList<SubjectItem> DatabaseManager::getSubjects() {
 
 QList<BellItem> DatabaseManager::getBellSchedule() {
     QList<BellItem> list;
-    QSqlQuery query("SELECT pair_number, start_time, end_time FROM bells ORDER BY pair_number;");
+    QSqlQuery query("SELECT pair_number, start_time, end_time FROM bells ORDER BY pair_number;", m_db);
     while (query.next()) {
         list.append({query.value(0).toInt(), query.value(1).toString(), query.value(2).toString()});
     }
     return list;
 }
 
-bool DatabaseManager::updateBellSchedule(const QList<BellItem> &bells) {
-    QSqlQuery query;
-    m_db.transaction();
-    query.exec("DELETE FROM bells;");
+bool DatabaseManager::runSave(int id, const QString &insertSql, const QString &updateSql, const QVariantMap &values,
+                              const QString &duplicateMessage, QString &outErrorMessage) {
+    QSqlQuery query(m_db);
+    query.prepare(id > 0 ? updateSql : insertSql);
+    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+        query.bindValue(":" + it.key(), it.value());
+    }
+    if (id > 0) query.bindValue(":id", id);
 
+    if (!query.exec()) {
+        const QString text = query.lastError().text();
+        outErrorMessage = text.contains("UNIQUE", Qt::CaseInsensitive)
+                              ? duplicateMessage
+                              : "Помилка бази даних: " + text;
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::saveGroup(int id, const QString &name, QString &outErrorMessage) {
+    if (name.trimmed().isEmpty()) {
+        outErrorMessage = "Назва групи не може бути порожньою.";
+        return false;
+    }
+    return runSave(id,
+                   "INSERT INTO groups (name) VALUES (:name);",
+                   "UPDATE groups SET name = :name WHERE id = :id;",
+                   {{"name", name.trimmed()}},
+                   "Група з такою назвою вже існує.", outErrorMessage);
+}
+
+bool DatabaseManager::saveTeacher(int id, const QString &fullName, const QString &department, QString &outErrorMessage) {
+    if (fullName.trimmed().isEmpty()) {
+        outErrorMessage = "ПІБ викладача не може бути порожнім.";
+        return false;
+    }
+    return runSave(id,
+                   "INSERT INTO teachers (full_name, department) VALUES (:name, :dept);",
+                   "UPDATE teachers SET full_name = :name, department = :dept WHERE id = :id;",
+                   {{"name", fullName.trimmed()}, {"dept", department.trimmed()}},
+                   "Такий викладач вже існує.", outErrorMessage);
+}
+
+bool DatabaseManager::saveClassroom(int id, const QString &roomNumber, int capacity, QString &outErrorMessage) {
+    if (roomNumber.trimmed().isEmpty()) {
+        outErrorMessage = "Номер аудиторії не може бути порожнім.";
+        return false;
+    }
+    return runSave(id,
+                   "INSERT INTO classrooms (room_number, capacity) VALUES (:room, :cap);",
+                   "UPDATE classrooms SET room_number = :room, capacity = :cap WHERE id = :id;",
+                   {{"room", roomNumber.trimmed()}, {"cap", capacity > 0 ? capacity : 30}},
+                   "Аудиторія з таким номером вже існує.", outErrorMessage);
+}
+
+bool DatabaseManager::saveSubject(int id, const QString &name, const QString &colorHex, QString &outErrorMessage) {
+    if (name.trimmed().isEmpty()) {
+        outErrorMessage = "Назва предмета не може бути порожньою.";
+        return false;
+    }
+    const QString color = QColor::isValidColorName(colorHex) ? colorHex : QString("#4CAF50");
+    return runSave(id,
+                   "INSERT INTO subjects (name, color_hex) VALUES (:name, :color);",
+                   "UPDATE subjects SET name = :name, color_hex = :color WHERE id = :id;",
+                   {{"name", name.trimmed()}, {"color", color}},
+                   "Такий предмет вже існує.", outErrorMessage);
+}
+
+bool DatabaseManager::deleteEntity(Entity entity, int id, QString &outErrorMessage) {
+    if (id <= 0) {
+        outErrorMessage = "Некоректний ідентифікатор запису.";
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.prepare(QString("DELETE FROM %1 WHERE id = :id;").arg(tableOf(entity)));
+    query.bindValue(":id", id);
+
+    if (!query.exec()) {
+        outErrorMessage = "Помилка видалення: " + query.lastError().text();
+        return false;
+    }
+    if (query.numRowsAffected() <= 0) {
+        outErrorMessage = "Запис не знайдено.";
+        return false;
+    }
+    return true;
+}
+
+int DatabaseManager::countLessons(Entity entity, int id) {
+    QSqlQuery query(m_db);
+    query.prepare(QString("SELECT COUNT(*) FROM schedule WHERE %1 = :id;").arg(scheduleColumnOf(entity)));
+    query.bindValue(":id", id);
+    return (query.exec() && query.next()) ? query.value(0).toInt() : 0;
+}
+
+bool DatabaseManager::updateBellSchedule(const QList<BellItem> &bells, QString &outErrorMessage) {
+    if (bells.isEmpty()) {
+        outErrorMessage = "Розклад дзвінків не може бути порожнім.";
+        return false;
+    }
+
+    QSqlQuery query(m_db);
+    query.exec("SELECT COALESCE(MAX(pair_number), 0) FROM schedule;");
+    if (query.next() && query.value(0).toInt() > bells.size()) {
+        outErrorMessage = QString("У розкладі вже є заняття на %1-й парі. Видалення пар, що використовуються, неможливе.")
+                              .arg(query.value(0).toInt());
+        return false;
+    }
+
+    m_db.transaction();
+    if (!query.exec("DELETE FROM bells;")) {
+        outErrorMessage = query.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+
+    query.prepare("INSERT INTO bells (pair_number, start_time, end_time) VALUES (:p, :s, :e);");
     for (const auto &b : bells) {
-        query.prepare("INSERT INTO bells (pair_number, start_time, end_time) VALUES (:p, :s, :e);");
         query.bindValue(":p", b.pairNumber);
         query.bindValue(":s", b.startTime);
         query.bindValue(":e", b.endTime);
         if (!query.exec()) {
+            outErrorMessage = query.lastError().text();
             m_db.rollback();
             return false;
         }
     }
-    return m_db.commit();
+
+    if (!m_db.commit()) {
+        outErrorMessage = m_db.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+QString DatabaseManager::findConflict(const ScheduleRecord &record) {
+    struct Check {
+        const char *column;
+        int value;
+        const char *message;
+    };
+
+    const Check checks[] = {
+        {"s.teacher_id", record.teacherId, "Конфлікт: викладач вже веде пару у групи %1 у цей час!"},
+        {"s.classroom_id", record.classroomId, "Конфлікт: аудиторія вже зайнята групою %1 у цей час!"},
+        {"s.group_id", record.groupId, "Конфлікт: у групи %1 вже є пара у цей час!"}
+    };
+
+    for (const auto &c : checks) {
+        QSqlQuery query(m_db);
+        query.prepare(QString("SELECT g.name FROM schedule s JOIN groups g ON s.group_id = g.id "
+                              "WHERE %1 = :value AND s.day_of_week = :day AND s.pair_number = :pair "
+                              "AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type) LIMIT 1;")
+                          .arg(c.column));
+        query.bindValue(":value", c.value);
+        query.bindValue(":day", record.dayOfWeek);
+        query.bindValue(":pair", record.pairNumber);
+        query.bindValue(":w_all", record.weekType);
+        query.bindValue(":w_type", record.weekType);
+
+        if (!query.exec())
+            return "Помилка бази даних: " + query.lastError().text();
+        if (query.next())
+            return QString::fromUtf8(c.message).arg(query.value(0).toString());
+    }
+    return QString();
 }
 
 bool DatabaseManager::addScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage) {
-    QSqlQuery checkQuery;
-
-    // Перевірка 1: Накладка викладача
-    checkQuery.prepare("SELECT g.name FROM schedule s JOIN groups g ON s.group_id = g.id "
-                       "WHERE s.teacher_id = :t_id AND s.day_of_week = :day AND s.pair_number = :pair "
-                       "AND (s.week_type = 0 OR :w_type = 0 OR s.week_type = :w_type);");
-    checkQuery.bindValue(":t_id", record.teacherId);
-    checkQuery.bindValue(":day", record.dayOfWeek);
-    checkQuery.bindValue(":pair", record.pairNumber);
-    checkQuery.bindValue(":w_type", record.weekType);
-    if (checkQuery.exec() && checkQuery.next()) {
-        outErrorMessage = QString("Конфлікт: Викладач вже веде пару у групи %1 у цей час!").arg(checkQuery.value(0).toString());
+    if (record.groupId <= 0 || record.subjectId <= 0 || record.teacherId <= 0 || record.classroomId <= 0) {
+        outErrorMessage = "Заповніть усі поля: група, предмет, викладач та аудиторія.";
         return false;
     }
 
-    // Перевірка 2: Накладка аудиторії
-    checkQuery.prepare("SELECT g.name FROM schedule s JOIN groups g ON s.group_id = g.id "
-                       "WHERE s.classroom_id = :c_id AND s.day_of_week = :day AND s.pair_number = :pair "
-                       "AND (s.week_type = 0 OR :w_type = 0 OR s.week_type = :w_type);");
-    checkQuery.bindValue(":c_id", record.classroomId);
-    checkQuery.bindValue(":day", record.dayOfWeek);
-    checkQuery.bindValue(":pair", record.pairNumber);
-    checkQuery.bindValue(":w_type", record.weekType);
-    if (checkQuery.exec() && checkQuery.next()) {
-        outErrorMessage = QString("Конфлікт: Аудиторія вже зайнята групою %1 у цей час!").arg(checkQuery.value(0).toString());
+    outErrorMessage = findConflict(record);
+    if (!outErrorMessage.isEmpty())
         return false;
-    }
 
-    // Додавання запису
-    QSqlQuery insertQuery;
-    insertQuery.prepare("INSERT INTO schedule (group_id, subject_id, teacher_id, classroom_id, day_of_week, pair_number, week_type) "
-                        "VALUES (:g_id, :s_id, :t_id, :c_id, :day, :pair, :w_type);");
-    insertQuery.bindValue(":g_id", record.groupId);
-    insertQuery.bindValue(":s_id", record.subjectId);
-    insertQuery.bindValue(":t_id", record.teacherId);
-    insertQuery.bindValue(":c_id", record.classroomId);
-    insertQuery.bindValue(":day", record.dayOfWeek);
-    insertQuery.bindValue(":pair", record.pairNumber);
-    insertQuery.bindValue(":w_type", record.weekType);
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO schedule (group_id, subject_id, teacher_id, classroom_id, day_of_week, pair_number, week_type) "
+                  "VALUES (:g_id, :s_id, :t_id, :c_id, :day, :pair, :w_type);");
+    query.bindValue(":g_id", record.groupId);
+    query.bindValue(":s_id", record.subjectId);
+    query.bindValue(":t_id", record.teacherId);
+    query.bindValue(":c_id", record.classroomId);
+    query.bindValue(":day", record.dayOfWeek);
+    query.bindValue(":pair", record.pairNumber);
+    query.bindValue(":w_type", record.weekType);
 
-    if (!insertQuery.exec()) {
-        outErrorMessage = "Помилка бази даних: " + insertQuery.lastError().text();
+    if (!query.exec()) {
+        outErrorMessage = "Помилка бази даних: " + query.lastError().text();
         return false;
     }
     return true;
@@ -239,7 +376,7 @@ bool DatabaseManager::addScheduleRecord(const ScheduleRecord &record, QString &o
 
 QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int weekType) {
     QList<ScheduleRecord> list;
-    QSqlQuery query;
+    QSqlQuery query(m_db);
     query.prepare(R"(
         SELECT s.id, s.group_id, s.subject_id, s.teacher_id, s.classroom_id,
                s.day_of_week, s.pair_number, s.week_type,
@@ -248,37 +385,40 @@ QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int week
         JOIN subjects sub ON s.subject_id = sub.id
         JOIN teachers t ON s.teacher_id = t.id
         JOIN classrooms c ON s.classroom_id = c.id
-        WHERE s.group_id = :g_id AND (s.week_type = 0 OR :w_type = 0 OR s.week_type = :w_type);
+        WHERE s.group_id = :g_id AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type)
+        ORDER BY s.day_of_week, s.pair_number, s.week_type;
     )");
     query.bindValue(":g_id", groupId);
+    query.bindValue(":w_all", weekType);
     query.bindValue(":w_type", weekType);
 
-    if (query.exec()) {
-        while (query.next()) {
-            ScheduleRecord r;
-            r.id = query.value(0).toInt();
-            r.groupId = query.value(1).toInt();
-            r.subjectId = query.value(2).toInt();
-            r.teacherId = query.value(3).toInt();
-            r.classroomId = query.value(4).toInt();
-            r.dayOfWeek = query.value(5).toInt();
-            r.pairNumber = query.value(6).toInt();
-            r.weekType = query.value(7).toInt();
+    if (!query.exec()) {
+        qDebug() << "Помилка завантаження розкладу:" << query.lastError().text();
+        return list;
+    }
 
-            r.subjectName = query.value(8).toString();
-            r.teacherName = query.value(9).toString();
-            r.roomNumber = query.value(10).toString();
-            r.colorHex = query.value(11).toString();
-
-            list.append(r);
-        }
+    while (query.next()) {
+        ScheduleRecord r;
+        r.id = query.value(0).toInt();
+        r.groupId = query.value(1).toInt();
+        r.subjectId = query.value(2).toInt();
+        r.teacherId = query.value(3).toInt();
+        r.classroomId = query.value(4).toInt();
+        r.dayOfWeek = query.value(5).toInt();
+        r.pairNumber = query.value(6).toInt();
+        r.weekType = query.value(7).toInt();
+        r.subjectName = query.value(8).toString();
+        r.teacherName = query.value(9).toString();
+        r.roomNumber = query.value(10).toString();
+        r.colorHex = query.value(11).toString();
+        list.append(r);
     }
     return list;
 }
 
 bool DatabaseManager::deleteScheduleRecord(int recordId) {
-    QSqlQuery query;
+    QSqlQuery query(m_db);
     query.prepare("DELETE FROM schedule WHERE id = :id;");
     query.bindValue(":id", recordId);
-    return query.exec();
+    return query.exec() && query.numRowsAffected() > 0;
 }

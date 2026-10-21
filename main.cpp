@@ -1,14 +1,20 @@
 #include "mainwindow.h"
 #include "databasemanager.h"
 #include <QApplication>
+#include <QDir>
+#include <QStandardPaths>
+#include <QMessageBox>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
+    a.setApplicationName("SmartSchedule");
 
-    // Ініціалізація бази даних SQLite
-    if (!DatabaseManager::instance().connectToDatabase("schedule.db")) {
-        qDebug() << "Помилка відкриття бази даних. Програма завершується.";
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dataDir);
+
+    if (!DatabaseManager::instance().connectToDatabase(dataDir + "/schedule.db")) {
+        QMessageBox::critical(nullptr, "Помилка", "Не вдалося відкрити базу даних. Програма завершується.");
         return -1;
     }
 

@@ -24,6 +24,10 @@ private slots:
 
 private:
     void loadBells();
+    void appendRow(const QTime &start, const QTime &end);
+    void renumberRows();
+    QTime timeAt(int row, int column) const;
+    QString validate() const;
 
     QTableWidget *m_tableWidget;
     QPushButton *m_addBtn;

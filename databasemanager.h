@@ -2,95 +2,109 @@
 #define DATABASEMANAGER_H
 
 #include <QString>
+#include <QList>
+#include <QVariantMap>
+#include <QColor>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDebug>
-#include <QList>
+
+inline constexpr QChar kNewLine(QChar::LineFeed);
 
 struct GroupItem {
-    int id;
+    int id = 0;
     QString name;
 };
 
 struct TeacherItem {
-    int id;
+    int id = 0;
     QString name;
     QString department;
 };
 
 struct ClassroomItem {
-    int id;
+    int id = 0;
     QString roomNumber;
-    int capacity;
+    int capacity = 0;
 };
 
 struct SubjectItem {
-    int id;
+    int id = 0;
     QString name;
     QString colorHex;
 };
 
 struct BellItem {
-    int pairNumber;
+    int pairNumber = 0;
     QString startTime;
     QString endTime;
 };
 
 struct ScheduleRecord {
-    int id;
-    int groupId;
-    int subjectId;
-    int teacherId;
-    int classroomId;
-    int dayOfWeek;    // 1..5 (Пн..Пт)
-    int pairNumber;   // 1..N пара
-    int weekType;     // 0 = щотижня, 1 = чисельник, 2 = знаменник, 3 = 3 тиждень, 4 = 4 тиждень
+    int id = 0;
+    int groupId = 0;
+    int subjectId = 0;
+    int teacherId = 0;
+    int classroomId = 0;
+    int dayOfWeek = 0;
+    int pairNumber = 0;
+    int weekType = 0;
 
-    // Допоміжні поля для виводу у таблиці
-    QString groupName;
     QString subjectName;
     QString teacherName;
     QString roomNumber;
     QString colorHex;
 };
 
+enum class Entity { Group, Teacher, Classroom, Subject };
+
+inline QString weekTypeName(int weekType)
+{
+    switch (weekType) {
+    case 0: return "Постійно (Кожного тижня)";
+    case 1: return "1-й тиждень (Чисельник)";
+    case 2: return "2-й тиждень (Знаменник)";
+    default: return QString("%1-й тиждень").arg(weekType);
+    }
+}
+
 class DatabaseManager {
 public:
     static DatabaseManager& instance();
 
-    bool connectToDatabase(const QString &dbName = "schedule.db");
-    bool createTables();
+    bool connectToDatabase(const QString &dbPath);
     void closeDatabase();
 
-    // Отримання списків для ComboBox та таблиць
     QList<GroupItem> getGroups();
     QList<TeacherItem> getTeachers();
     QList<ClassroomItem> getClassrooms();
     QList<SubjectItem> getSubjects();
     QList<BellItem> getBellSchedule();
 
-    // Оновлення розкладу дзвінків
-    bool updateBellSchedule(const QList<BellItem> &bells);
+    bool saveGroup(int id, const QString &name, QString &outErrorMessage);
+    bool saveTeacher(int id, const QString &fullName, const QString &department, QString &outErrorMessage);
+    bool saveClassroom(int id, const QString &roomNumber, int capacity, QString &outErrorMessage);
+    bool saveSubject(int id, const QString &name, const QString &colorHex, QString &outErrorMessage);
+    bool deleteEntity(Entity entity, int id, QString &outErrorMessage);
+    int countLessons(Entity entity, int id);
 
-    // Заповнення початковими даними при першому запуску
-    void seedInitialData();
-
-    // Додавання розкладу з автоперевіркою на конфлікти
+    bool updateBellSchedule(const QList<BellItem> &bells, QString &outErrorMessage);
     bool addScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage);
-
-    // Завантаження розкладу для конкретної групи
     QList<ScheduleRecord> getScheduleForGroup(int groupId, int weekType = 0);
-
-    // Видалення пари
     bool deleteScheduleRecord(int recordId);
 
 private:
     DatabaseManager() = default;
     ~DatabaseManager();
-
     DatabaseManager(const DatabaseManager&) = delete;
     DatabaseManager& operator=(const DatabaseManager&) = delete;
+
+    bool createTables();
+    bool seedInitialData();
+    bool runSave(int id, const QString &insertSql, const QString &updateSql, const QVariantMap &values,
+                 const QString &duplicateMessage, QString &outErrorMessage);
+    QString findConflict(const ScheduleRecord &record);
 
     QSqlDatabase m_db;
 };

@@ -9,34 +9,40 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QHeaderView>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
 #include <QDate>
+#include <QTimer>
+#include <QMap>
+#include <QPair>
+#include <functional>
 #include "databasemanager.h"
 #include "addentrydialog.h"
 #include "bellsdialog.h"
+#include "referencedialog.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
 
 private slots:
-    void onGroupChanged(int index);
-    void onWeekFilterChanged(int index);
     void onAddEntryClicked();
     void onDeleteEntryClicked();
     void onOpenBellsDialog();
+    void onOpenAboutDialog();
+    void onExportPdf();
     void refreshScheduleTable();
+    void updateCurrentWeekInfo();
 
 private:
     void setupUi();
     void loadGroups();
-    void updateCurrentWeekInfo();
+    void addReferenceAction(QMenu *menu, const QString &text, std::function<ReferenceConfig()> makeConfig);
 
     QLabel *m_statusWeekLabel;
     QComboBox *m_groupCombo;
@@ -47,3 +53,4 @@ private:
 };
 
 #endif // MAINWINDOW_H
+

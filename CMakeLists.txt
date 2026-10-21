@@ -6,29 +6,28 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Sql PrintSupport)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Sql)
 
 qt_standard_project_setup()
 
 qt_add_executable(SmartSchedule
     WIN32 MACOSX_BUNDLE
     main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
+    mainwindow.h mainwindow.cpp
     databasemanager.h databasemanager.cpp
     addentrydialog.h addentrydialog.cpp
     bellsdialog.h bellsdialog.cpp
+    referencedialog.h referencedialog.cpp
+    referencedialog.h referencedialog.cpp
 )
 
 target_link_libraries(SmartSchedule
     PRIVATE
-        Qt::Core
-        Qt::Widgets
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
         Qt6::Sql
-        Qt6::PrintSupport
 )
 
 install(TARGETS SmartSchedule

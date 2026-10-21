@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QPushButton>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QFormLayout>
 #include <QMessageBox>
 #include "databasemanager.h"
