@@ -19,7 +19,6 @@ qt_add_executable(SmartSchedule
     addentrydialog.h addentrydialog.cpp
     bellsdialog.h bellsdialog.cpp
     referencedialog.h referencedialog.cpp
-    referencedialog.h referencedialog.cpp
 )
 
 target_link_libraries(SmartSchedule

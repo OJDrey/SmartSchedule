@@ -165,6 +165,7 @@ void MainWindow::setupUi() {
     connect(m_weekFilterCombo, &QComboBox::currentIndexChanged, this, &MainWindow::refreshScheduleTable);
     connect(m_addBtn, &QPushButton::clicked, this, &MainWindow::onAddEntryClicked);
     connect(m_deleteBtn, &QPushButton::clicked, this, &MainWindow::onDeleteEntryClicked);
+    connect(m_tableWidget, &QTableWidget::cellDoubleClicked, this, &MainWindow::onCellDoubleClicked);
 }
 
 void MainWindow::addReferenceAction(QMenu *menu, const QString &text, std::function<ReferenceConfig()> makeConfig) {
@@ -209,7 +210,7 @@ void MainWindow::onOpenBellsDialog() {
 
 void MainWindow::onOpenAboutDialog() {
     QMessageBox::about(this, "Про програму SmartSchedule",
-                       "<h2>SmartSchedule v10.0</h2>"
+                       "<h2>SmartSchedule v11.0</h2>"
                        "<p><b>Автоматизація розкладу занять навчального закладу</b></p>"
                        "<p>Програма призначена для формування та керування навчальним розкладом, "
                        "контролю часових конфліктів викладачів, аудиторій та груп, "
@@ -334,6 +335,31 @@ void MainWindow::onAddEntryClicked() {
     }
 }
 
+int MainWindow::pickRecordId(const QTableWidgetItem *item, const QString &title, const QString &prompt) {
+    const QVariantList ids = item->data(IdsRole).toList();
+    if (ids.isEmpty()) return 0;
+    if (ids.size() == 1) return ids.first().toInt();
+
+    const QStringList labels = item->data(LabelsRole).toStringList();
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, title, prompt, labels, 0, false, &ok);
+    if (!ok) return 0;
+    return ids.at(qMax(0, labels.indexOf(chosen))).toInt();
+}
+
+void MainWindow::onCellDoubleClicked(int row, int column) {
+    const auto *item = m_tableWidget->item(row, column);
+    if (!item) return;
+
+    const int recordId = pickRecordId(item, "Редагування", "Оберіть заняття для редагування:");
+    if (recordId <= 0) return;
+
+    AddEntryDialog dlg(m_groupCombo->currentData().toInt(), this, recordId);
+    if (dlg.exec() == QDialog::Accepted) {
+        refreshScheduleTable();
+    }
+}
+
 void MainWindow::onDeleteEntryClicked() {
     const auto *item = m_tableWidget->currentItem();
     if (!item) {
@@ -341,27 +367,15 @@ void MainWindow::onDeleteEntryClicked() {
         return;
     }
 
-    const QVariantList ids = item->data(IdsRole).toList();
-    if (ids.isEmpty()) {
-        QMessageBox::information(this, "Видалення", "Обрана комірка порожня.");
-        return;
-    }
-
-    int index = 0;
-    if (ids.size() > 1) {
-        const QStringList labels = item->data(LabelsRole).toStringList();
-        bool ok = false;
-        const QString chosen = QInputDialog::getItem(this, "Видалення", "Оберіть заняття для видалення:", labels, 0, false, &ok);
-        if (!ok) return;
-        index = qMax(0, labels.indexOf(chosen));
-    }
+    const int recordId = pickRecordId(item, "Видалення", "Оберіть заняття для видалення:");
+    if (recordId <= 0) return;
 
     const auto answer = QMessageBox::question(this, "Підтвердження",
                                               "Ви дійсно бажаєте видалити обране заняття з розкладу?",
                                               QMessageBox::Yes | QMessageBox::No);
     if (answer != QMessageBox::Yes) return;
 
-    if (DatabaseManager::instance().deleteScheduleRecord(ids.at(index).toInt())) {
+    if (DatabaseManager::instance().deleteScheduleRecord(recordId)) {
         refreshScheduleTable();
     } else {
         QMessageBox::critical(this, "Помилка", "Не вдалося видалити заняття.");

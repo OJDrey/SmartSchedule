@@ -329,10 +329,11 @@ QString DatabaseManager::findConflict(const ScheduleRecord &record) {
     for (const auto &c : checks) {
         QSqlQuery query(m_db);
         query.prepare(QString("SELECT g.name FROM schedule s JOIN groups g ON s.group_id = g.id "
-                              "WHERE %1 = :value AND s.day_of_week = :day AND s.pair_number = :pair "
+                              "WHERE %1 = :value AND s.id != :self AND s.day_of_week = :day AND s.pair_number = :pair "
                               "AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type) LIMIT 1;")
                           .arg(c.column));
         query.bindValue(":value", c.value);
+        query.bindValue(":self", record.id);
         query.bindValue(":day", record.dayOfWeek);
         query.bindValue(":pair", record.pairNumber);
         query.bindValue(":w_all", record.weekType);
@@ -371,6 +372,53 @@ bool DatabaseManager::addScheduleRecord(const ScheduleRecord &record, QString &o
         outErrorMessage = "Помилка бази даних: " + query.lastError().text();
         return false;
     }
+    return true;
+}
+
+bool DatabaseManager::updateScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage) {
+    if (record.id <= 0 || record.groupId <= 0 || record.subjectId <= 0 || record.teacherId <= 0 || record.classroomId <= 0) {
+        outErrorMessage = "Заповніть усі поля: предмет, викладач та аудиторія.";
+        return false;
+    }
+
+    outErrorMessage = findConflict(record);
+    if (!outErrorMessage.isEmpty())
+        return false;
+
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE schedule SET subject_id = :s_id, teacher_id = :t_id, classroom_id = :c_id, "
+                  "day_of_week = :day, pair_number = :pair, week_type = :w_type WHERE id = :id;");
+    query.bindValue(":s_id", record.subjectId);
+    query.bindValue(":t_id", record.teacherId);
+    query.bindValue(":c_id", record.classroomId);
+    query.bindValue(":day", record.dayOfWeek);
+    query.bindValue(":pair", record.pairNumber);
+    query.bindValue(":w_type", record.weekType);
+    query.bindValue(":id", record.id);
+
+    if (!query.exec()) {
+        outErrorMessage = "Помилка бази даних: " + query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::getScheduleRecord(int recordId, ScheduleRecord &outRecord) {
+    QSqlQuery query(m_db);
+    query.prepare("SELECT id, group_id, subject_id, teacher_id, classroom_id, day_of_week, pair_number, week_type "
+                  "FROM schedule WHERE id = :id;");
+    query.bindValue(":id", recordId);
+    if (!query.exec() || !query.next())
+        return false;
+
+    outRecord.id = query.value(0).toInt();
+    outRecord.groupId = query.value(1).toInt();
+    outRecord.subjectId = query.value(2).toInt();
+    outRecord.teacherId = query.value(3).toInt();
+    outRecord.classroomId = query.value(4).toInt();
+    outRecord.dayOfWeek = query.value(5).toInt();
+    outRecord.pairNumber = query.value(6).toInt();
+    outRecord.weekType = query.value(7).toInt();
     return true;
 }
 

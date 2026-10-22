@@ -14,7 +14,7 @@ class AddEntryDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit AddEntryDialog(int currentGroupId, QWidget *parent = nullptr);
+    explicit AddEntryDialog(int currentGroupId, QWidget *parent = nullptr, int editRecordId = 0);
     ScheduleRecord getRecord() const;
 
 private slots:
@@ -22,6 +22,7 @@ private slots:
 
 private:
     int m_groupId;
+    int m_recordId;
     QComboBox *m_dayCombo;
     QComboBox *m_pairCombo;
     QComboBox *m_weekTypeCombo;

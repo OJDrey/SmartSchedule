@@ -33,6 +33,7 @@ public:
 private slots:
     void onAddEntryClicked();
     void onDeleteEntryClicked();
+    void onCellDoubleClicked(int row, int column);
     void onOpenBellsDialog();
     void onOpenAboutDialog();
     void onExportPdf();
@@ -42,6 +43,7 @@ private slots:
 private:
     void setupUi();
     void loadGroups();
+    int pickRecordId(const QTableWidgetItem *item, const QString &title, const QString &prompt);
     void addReferenceAction(QMenu *menu, const QString &text, std::function<ReferenceConfig()> makeConfig);
 
     QLabel *m_statusWeekLabel;
@@ -53,4 +55,3 @@ private:
 };
 
 #endif // MAINWINDOW_H
-

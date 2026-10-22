@@ -1,7 +1,7 @@
 #include "addentrydialog.h"
 
-AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent)
-    : QDialog(parent), m_groupId(currentGroupId)
+AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent, int editRecordId)
+    : QDialog(parent), m_groupId(currentGroupId), m_recordId(editRecordId)
 {
     setWindowTitle("Додати пару у розклад");
     resize(400, 300);
@@ -36,6 +36,24 @@ AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent)
         m_roomCombo->addItem(QString("Ауд. %1 (місткість: %2)").arg(r.roomNumber).arg(r.capacity), r.id);
     }
 
+    if (m_recordId > 0) {
+        setWindowTitle("Редагування пари");
+
+        ScheduleRecord existing;
+        if (db.getScheduleRecord(m_recordId, existing)) {
+            auto select = [](QComboBox *combo, int value) {
+                const int index = combo->findData(value);
+                if (index >= 0) combo->setCurrentIndex(index);
+            };
+            m_dayCombo->setCurrentIndex(qBound(0, existing.dayOfWeek - 1, m_dayCombo->count() - 1));
+            select(m_pairCombo, existing.pairNumber);
+            select(m_weekTypeCombo, existing.weekType);
+            select(m_subjectCombo, existing.subjectId);
+            select(m_teacherCombo, existing.teacherId);
+            select(m_roomCombo, existing.classroomId);
+        }
+    }
+
     auto *formLayout = new QFormLayout();
     formLayout->addRow("День тижня:", m_dayCombo);
     formLayout->addRow("Номер пари:", m_pairCombo);
@@ -66,6 +84,7 @@ AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent)
 
 void AddEntryDialog::onSaveClicked() {
     ScheduleRecord record;
+    record.id = m_recordId;
     record.groupId = m_groupId;
     record.dayOfWeek = m_dayCombo->currentIndex() + 1;
     record.pairNumber = m_pairCombo->currentData().toInt();
@@ -75,8 +94,10 @@ void AddEntryDialog::onSaveClicked() {
     record.classroomId = m_roomCombo->currentData().toInt();
 
     QString errorMsg;
-    if (!DatabaseManager::instance().addScheduleRecord(record, errorMsg)) {
-        QMessageBox::critical(this, "Помилка створення", errorMsg);
+    auto &db = DatabaseManager::instance();
+    const bool saved = m_recordId > 0 ? db.updateScheduleRecord(record, errorMsg) : db.addScheduleRecord(record, errorMsg);
+    if (!saved) {
+        QMessageBox::critical(this, m_recordId > 0 ? "Помилка редагування" : "Помилка створення", errorMsg);
         return;
     }
 

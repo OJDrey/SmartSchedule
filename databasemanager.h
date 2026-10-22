@@ -91,6 +91,8 @@ public:
 
     bool updateBellSchedule(const QList<BellItem> &bells, QString &outErrorMessage);
     bool addScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage);
+    bool updateScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage);
+    bool getScheduleRecord(int recordId, ScheduleRecord &outRecord);
     QList<ScheduleRecord> getScheduleForGroup(int groupId, int weekType = 0);
     bool deleteScheduleRecord(int recordId);
 
