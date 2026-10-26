@@ -1,4 +1,6 @@
 #include "referencedialog.h"
+#include "tablefile.h"
+#include <QFileDialog>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -39,13 +41,22 @@ ReferenceDialog::ReferenceDialog(const ReferenceConfig &config, QWidget *parent)
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->addLayout(topBtnLayout);
+    m_importBtn = new QPushButton("📥 Імпорт (Excel/CSV)", this);
+    m_exportBtn = new QPushButton("📤 Експорт (Excel/CSV)", this);
+    auto *csvLayout = new QHBoxLayout();
+    csvLayout->addWidget(m_importBtn);
+    csvLayout->addWidget(m_exportBtn);
+
     mainLayout->addWidget(m_tableWidget);
+    mainLayout->addLayout(csvLayout);
     mainLayout->addWidget(m_closeBtn);
 
     connect(m_addBtn, &QPushButton::clicked, this, &ReferenceDialog::onAddClicked);
     connect(m_editBtn, &QPushButton::clicked, this, &ReferenceDialog::onEditClicked);
     connect(m_deleteBtn, &QPushButton::clicked, this, &ReferenceDialog::onDeleteClicked);
     connect(m_tableWidget, &QTableWidget::cellDoubleClicked, this, &ReferenceDialog::onEditClicked);
+    connect(m_importBtn, &QPushButton::clicked, this, &ReferenceDialog::onImportClicked);
+    connect(m_exportBtn, &QPushButton::clicked, this, &ReferenceDialog::onExportClicked);
     connect(m_closeBtn, &QPushButton::clicked, this, &QDialog::accept);
 
     reload();
@@ -207,5 +218,75 @@ void ReferenceDialog::onDeleteClicked() {
         reload();
     } else {
         QMessageBox::critical(this, "Помилка", error);
+    }
+}
+
+void ReferenceDialog::onImportClicked() {
+    const QString path = QFileDialog::getOpenFileName(this, "Імпорт довідника", QString(),
+                                                      "Таблиці (*.xlsx *.csv *.txt);;Excel (*.xlsx);;CSV (*.csv *.txt)");
+    if (path.isEmpty()) return;
+
+    QString error;
+    auto rows = TableFile::read(path, error);
+    if (rows.isEmpty()) {
+        QMessageBox::warning(this, "Імпорт", error.isEmpty() ? QString("Файл порожній.") : error);
+        return;
+    }
+
+    if (rows.first().value(0).trimmed().compare(m_config.fields.first().label, Qt::CaseInsensitive) == 0) {
+        rows.removeFirst();
+    }
+
+    const int columns = m_config.fields.size();
+    int imported = 0;
+    QStringList problems;
+
+    for (const auto &row : rows) {
+        QStringList values = row.mid(0, columns);
+        while (values.size() < columns) {
+            values << QString();
+        }
+
+        QString rowError;
+        if (m_config.save(0, values, rowError)) {
+            ++imported;
+        } else if (problems.size() < 5) {
+            problems << QString("«%1»: %2").arg(values.first(), rowError);
+        }
+    }
+
+    QString report = QString("Імпортовано записів: %1").arg(imported);
+    const int skipped = rows.size() - imported;
+    if (skipped > 0) {
+        report += kNewLine + QString("Пропущено: %1").arg(skipped) + kNewLine + problems.join(kNewLine);
+    }
+
+    QMessageBox::information(this, "Імпорт", report);
+    reload();
+}
+
+void ReferenceDialog::onExportClicked() {
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(this, "Експорт довідника", m_config.title + ".xlsx",
+                                                "Excel (*.xlsx);;CSV (*.csv)", &selectedFilter);
+    if (path.isEmpty()) return;
+    if (!TableFile::hasKnownSuffix(path)) path += selectedFilter.contains("csv") ? ".csv" : ".xlsx";
+
+    QStringList header;
+    for (const auto &field : m_config.fields) {
+        header << field.label;
+    }
+
+    QList<QStringList> rows;
+    rows.append(header);
+    for (const auto &row : m_config.load()) {
+        rows.append(row.values);
+    }
+
+    QString error;
+    if (TableFile::write(path, rows, error)) {
+        QMessageBox::information(this, "Експорт", "Дані успішно збережено.");
+    } else {
+        QMessageBox::critical(this, "Помилка", "Не вдалося зберегти файл: " + error);
     }
 }

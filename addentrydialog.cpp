@@ -1,6 +1,6 @@
 #include "addentrydialog.h"
 
-AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent, int editRecordId)
+AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent, int editRecordId, int presetDay, int presetPair)
     : QDialog(parent), m_groupId(currentGroupId), m_recordId(editRecordId)
 {
     setWindowTitle("Додати пару у розклад");
@@ -54,13 +54,23 @@ AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent, int editReco
         }
     }
 
+    if (m_recordId <= 0 && presetDay > 0) {
+        m_dayCombo->setCurrentIndex(qBound(0, presetDay - 1, m_dayCombo->count() - 1));
+        const int pairIndex = m_pairCombo->findData(presetPair);
+        if (pairIndex >= 0) m_pairCombo->setCurrentIndex(pairIndex);
+    }
+
     auto *formLayout = new QFormLayout();
     formLayout->addRow("День тижня:", m_dayCombo);
     formLayout->addRow("Номер пари:", m_pairCombo);
     formLayout->addRow("Цикл тижня:", m_weekTypeCombo);
     formLayout->addRow("Предмет:", m_subjectCombo);
     formLayout->addRow("Викладач:", m_teacherCombo);
-    formLayout->addRow("Аудиторія:", m_roomCombo);
+    m_findRoomBtn = new QPushButton("🔍 Вільні", this);
+    auto *roomRow = new QHBoxLayout();
+    roomRow->addWidget(m_roomCombo, 1);
+    roomRow->addWidget(m_findRoomBtn);
+    formLayout->addRow("Аудиторія:", roomRow);
 
     m_saveBtn = new QPushButton("Зберегти", this);
     m_saveBtn->setDefault(true);
@@ -79,6 +89,7 @@ AddEntryDialog::AddEntryDialog(int currentGroupId, QWidget *parent, int editReco
     m_saveBtn->setEnabled(hasData);
 
     connect(m_saveBtn, &QPushButton::clicked, this, &AddEntryDialog::onSaveClicked);
+    connect(m_findRoomBtn, &QPushButton::clicked, this, &AddEntryDialog::onFindRoomClicked);
     connect(m_cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
 }
 
@@ -103,6 +114,30 @@ void AddEntryDialog::onSaveClicked() {
 
     m_createdRecord = record;
     accept();
+}
+
+void AddEntryDialog::onFindRoomClicked() {
+    const auto rooms = DatabaseManager::instance().getFreeClassrooms(
+        m_dayCombo->currentIndex() + 1, m_pairCombo->currentData().toInt(),
+        m_weekTypeCombo->currentData().toInt(), m_recordId);
+
+    if (rooms.isEmpty()) {
+        QMessageBox::information(this, "Вільні аудиторії", "На вибраний час усі аудиторії зайняті.");
+        return;
+    }
+
+    QStringList labels;
+    for (const auto &r : rooms) {
+        labels << QString("Ауд. %1 (місткість: %2)").arg(r.roomNumber).arg(r.capacity);
+    }
+
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, "Вільні аудиторії",
+                                                 "Оберіть аудиторію (від найменшої місткості):", labels, 0, false, &ok);
+    if (!ok) return;
+
+    const int index = m_roomCombo->findData(rooms.at(qMax(0, labels.indexOf(chosen))).id);
+    if (index >= 0) m_roomCombo->setCurrentIndex(index);
 }
 
 ScheduleRecord AddEntryDialog::getRecord() const {

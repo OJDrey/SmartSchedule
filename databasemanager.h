@@ -55,6 +55,7 @@ struct ScheduleRecord {
     QString teacherName;
     QString roomNumber;
     QString colorHex;
+    QString groupName;
 };
 
 enum class Entity { Group, Teacher, Classroom, Subject };
@@ -79,6 +80,7 @@ public:
     QList<GroupItem> getGroups();
     QList<TeacherItem> getTeachers();
     QList<ClassroomItem> getClassrooms();
+    QList<ClassroomItem> getFreeClassrooms(int dayOfWeek, int pairNumber, int weekType, int excludeRecordId = 0);
     QList<SubjectItem> getSubjects();
     QList<BellItem> getBellSchedule();
 
@@ -94,7 +96,11 @@ public:
     bool updateScheduleRecord(const ScheduleRecord &record, QString &outErrorMessage);
     bool getScheduleRecord(int recordId, ScheduleRecord &outRecord);
     QList<ScheduleRecord> getScheduleForGroup(int groupId, int weekType = 0);
+    QList<ScheduleRecord> getScheduleForTeacher(int teacherId, int weekType = 0);
     bool deleteScheduleRecord(int recordId);
+
+    bool backupTo(const QString &path, QString &outErrorMessage);
+    bool restoreFrom(const QString &path, QString &outErrorMessage);
 
 private:
     DatabaseManager() = default;
@@ -107,8 +113,10 @@ private:
     bool runSave(int id, const QString &insertSql, const QString &updateSql, const QVariantMap &values,
                  const QString &duplicateMessage, QString &outErrorMessage);
     QString findConflict(const ScheduleRecord &record);
+    bool isValidBackup(const QString &path);
 
     QSqlDatabase m_db;
+    QString m_dbPath;
 };
 
 #endif // DATABASEMANAGER_H

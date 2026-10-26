@@ -1,4 +1,6 @@
 #include "databasemanager.h"
+#include <QFile>
+#include <QFileInfo>
 
 namespace {
 const char *tableOf(Entity entity)
@@ -34,6 +36,7 @@ DatabaseManager::~DatabaseManager() {
 bool DatabaseManager::connectToDatabase(const QString &dbPath) {
     m_db = QSqlDatabase::addDatabase("QSQLITE");
     m_db.setDatabaseName(dbPath);
+    m_dbPath = dbPath;
 
     if (!m_db.open()) {
         qDebug() << "Помилка відкриття БД:" << m_db.lastError().text();
@@ -273,6 +276,31 @@ int DatabaseManager::countLessons(Entity entity, int id) {
     return (query.exec() && query.next()) ? query.value(0).toInt() : 0;
 }
 
+QList<ClassroomItem> DatabaseManager::getFreeClassrooms(int dayOfWeek, int pairNumber, int weekType, int excludeRecordId) {
+    QList<ClassroomItem> list;
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        SELECT c.id, c.room_number, c.capacity FROM classrooms c
+        WHERE c.id NOT IN (
+            SELECT s.classroom_id FROM schedule s
+            WHERE s.id != :self AND s.day_of_week = :day AND s.pair_number = :pair
+              AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type))
+        ORDER BY c.capacity, c.room_number;
+    )");
+    query.bindValue(":self", excludeRecordId);
+    query.bindValue(":day", dayOfWeek);
+    query.bindValue(":pair", pairNumber);
+    query.bindValue(":w_all", weekType);
+    query.bindValue(":w_type", weekType);
+
+    if (query.exec()) {
+        while (query.next()) {
+            list.append({query.value(0).toInt(), query.value(1).toString(), query.value(2).toInt()});
+        }
+    }
+    return list;
+}
+
 bool DatabaseManager::updateBellSchedule(const QList<BellItem> &bells, QString &outErrorMessage) {
     if (bells.isEmpty()) {
         outErrorMessage = "Розклад дзвінків не може бути порожнім.";
@@ -464,9 +492,130 @@ QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int week
     return list;
 }
 
+QList<ScheduleRecord> DatabaseManager::getScheduleForTeacher(int teacherId, int weekType) {
+    QList<ScheduleRecord> list;
+    QSqlQuery query(m_db);
+    query.prepare(R"(
+        SELECT s.id, s.group_id, s.subject_id, s.teacher_id, s.classroom_id,
+               s.day_of_week, s.pair_number, s.week_type,
+               sub.name, c.room_number, sub.color_hex, g.name
+        FROM schedule s
+        JOIN subjects sub ON s.subject_id = sub.id
+        JOIN classrooms c ON s.classroom_id = c.id
+        JOIN groups g ON s.group_id = g.id
+        WHERE s.teacher_id = :t_id AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type)
+        ORDER BY s.day_of_week, s.pair_number, s.week_type;
+    )");
+    query.bindValue(":t_id", teacherId);
+    query.bindValue(":w_all", weekType);
+    query.bindValue(":w_type", weekType);
+
+    if (!query.exec()) {
+        qDebug() << "Помилка завантаження розкладу викладача:" << query.lastError().text();
+        return list;
+    }
+
+    while (query.next()) {
+        ScheduleRecord r;
+        r.id = query.value(0).toInt();
+        r.groupId = query.value(1).toInt();
+        r.subjectId = query.value(2).toInt();
+        r.teacherId = query.value(3).toInt();
+        r.classroomId = query.value(4).toInt();
+        r.dayOfWeek = query.value(5).toInt();
+        r.pairNumber = query.value(6).toInt();
+        r.weekType = query.value(7).toInt();
+        r.subjectName = query.value(8).toString();
+        r.roomNumber = query.value(9).toString();
+        r.colorHex = query.value(10).toString();
+        r.groupName = query.value(11).toString();
+        list.append(r);
+    }
+    return list;
+}
+
 bool DatabaseManager::deleteScheduleRecord(int recordId) {
     QSqlQuery query(m_db);
     query.prepare("DELETE FROM schedule WHERE id = :id;");
     query.bindValue(":id", recordId);
     return query.exec() && query.numRowsAffected() > 0;
+}
+
+bool DatabaseManager::backupTo(const QString &path, QString &outErrorMessage) {
+    if (QFileInfo(path).canonicalFilePath() == QFileInfo(m_dbPath).canonicalFilePath() && QFileInfo::exists(path)) {
+        outErrorMessage = "Не можна зберегти копію поверх робочої бази.";
+        return false;
+    }
+
+    QFile::remove(path);
+
+    QString escaped = path;
+    escaped.replace("'", "''");
+    QSqlQuery query(m_db);
+    if (query.exec(QString("VACUUM INTO '%1';").arg(escaped))) {
+        return true;
+    }
+
+    const QString vacuumError = query.lastError().text();
+    if (QFile::copy(m_dbPath, path)) {
+        return true;
+    }
+
+    outErrorMessage = "Не вдалося створити копію: " + vacuumError;
+    return false;
+}
+
+bool DatabaseManager::isValidBackup(const QString &path) {
+    if (!QFileInfo::exists(path)) return false;
+
+    const QString connectionName = "smartschedule_backup_check";
+    bool valid = false;
+    {
+        QSqlDatabase check = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+        check.setDatabaseName(path);
+        if (check.open()) {
+            const QStringList tables = check.tables();
+            valid = tables.contains("groups") && tables.contains("teachers") && tables.contains("classrooms")
+                    && tables.contains("subjects") && tables.contains("bells") && tables.contains("schedule");
+            check.close();
+        }
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    return valid;
+}
+
+bool DatabaseManager::restoreFrom(const QString &path, QString &outErrorMessage) {
+    if (!isValidBackup(path)) {
+        outErrorMessage = "Файл не є коректною копією бази SmartSchedule.";
+        return false;
+    }
+    if (QFileInfo(path).canonicalFilePath() == QFileInfo(m_dbPath).canonicalFilePath()) {
+        outErrorMessage = "Оберіть файл, відмінний від поточної бази.";
+        return false;
+    }
+
+    const QString currentPath = m_dbPath;
+    const QString safetyPath = currentPath + ".before-restore";
+
+    closeDatabase();
+
+    QFile::remove(safetyPath);
+    const bool saved = QFile::copy(currentPath, safetyPath);
+
+    bool replaced = QFile::remove(currentPath) && QFile::copy(path, currentPath);
+    if (replaced) {
+        QFile::setPermissions(currentPath, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    } else {
+        outErrorMessage = "Не вдалося замінити файл бази даних.";
+        if (saved) {
+            QFile::remove(currentPath);
+            QFile::copy(safetyPath, currentPath);
+        }
+    }
+
+    if (!connectToDatabase(currentPath)) {
+        outErrorMessage = "Не вдалося відкрити базу даних після відновлення.";
+        return false;
+    }
+    return replaced;
 }

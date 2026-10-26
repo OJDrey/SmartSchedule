@@ -38,6 +38,8 @@ private slots:
     void onAddClicked();
     void onEditClicked();
     void onDeleteClicked();
+    void onImportClicked();
+    void onExportClicked();
 
 private:
     void reload();
@@ -50,6 +52,8 @@ private:
     QPushButton *m_addBtn;
     QPushButton *m_editBtn;
     QPushButton *m_deleteBtn;
+    QPushButton *m_importBtn;
+    QPushButton *m_exportBtn;
     QPushButton *m_closeBtn;
 };
 
