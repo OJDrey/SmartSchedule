@@ -47,13 +47,16 @@
 
 ## Скріншоти
 
-|---|---|
-| [Режим викладача]<img width="1598" height="854" alt="зображення" src="https://github.com/user-attachments/assets/1470f2bb-aa1b-4a29-a184-129a9e881733" />|
-| [Навантаження]<img width="814" height="666" alt="зображення" src="https://github.com/user-attachments/assets/9025de9d-fc55-423d-8dbe-ac8afc7fc3bf" />|
-
-|---|---|
-| [Конфлікти]<img width="1599" height="854" alt="зображення" src="https://github.com/user-attachments/assets/98d9b536-37ea-49b3-9d58-8fd6917f482f" />|
-| [Імпорт]<img width="983" height="590" alt="зображення" src="https://github.com/user-attachments/assets/193c4193-a933-47aa-96a9-d318b0b524f9" />|
+<table>
+  <tr>
+    <td align="center"><b>Режим викладача</b><br><img src="https://github.com/user-attachments/assets/1470f2bb-aa1b-4a29-a184-129a9e881733" alt="Режим викладача" width="480"></td>
+    <td align="center"><b>Навантаження викладачів</b><br><img src="https://github.com/user-attachments/assets/9025de9d-fc55-423d-8dbe-ac8afc7fc3bf" alt="Навантаження викладачів" width="480"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Звіт про конфлікти</b><br><img src="https://github.com/user-attachments/assets/98d9b536-37ea-49b3-9d58-8fd6917f482f" alt="Звіт про конфлікти" width="480"></td>
+    <td align="center"><b>Імпорт розкладу</b><br><img src="https://github.com/user-attachments/assets/193c4193-a933-47aa-96a9-d318b0b524f9" alt="Імпорт розкладу" width="480"></td>
+  </tr>
+</table>
 
 ## Завантаження
 
