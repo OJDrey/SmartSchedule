@@ -138,7 +138,7 @@ C++17 · Qt 6 (Widgets, SQL, PrintSupport) · SQLite · [QXlsx](https://github.c
 
 ## Ліцензія
 
-[MIT](LICENSE.txt). Бібліотека QXlsx поширюється за власною ліцензією (MIT).
+[MIT](LICENSE). Бібліотека QXlsx поширюється за власною ліцензією (MIT).
 
 ## Автор
 
