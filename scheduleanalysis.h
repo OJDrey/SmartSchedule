@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QStyledItemDelegate>
 #include "databasemanager.h"
+#include "schedulefilter.h"
 
 namespace ScheduleAnalyzer {
 
@@ -63,6 +64,104 @@ inline QMap<int, double> pairHours(const QList<BellItem> &bells) {
         hours[b.pairNumber] = start.isValid() && end.isValid() ? start.secsTo(end) / 3600.0 : 0.0;
     }
     return hours;
+}
+
+struct Conflict {
+    QString type;
+    int day = 0;
+    int pair = 0;
+    QString description;
+    int groupId = 0;
+};
+
+struct RoomLoad {
+    double busyPairs = 0;
+    double percent = 0;
+};
+
+inline bool weeksOverlap(const ScheduleRecord &a, const ScheduleRecord &b) {
+    return a.weekType == 0 || b.weekType == 0 || a.weekType == b.weekType;
+}
+
+inline QList<Conflict> findConflicts(const QList<ScheduleRecord> &records, const QList<BellItem> &bells) {
+    QList<Conflict> result;
+
+    QSet<int> knownPairs;
+    for (const auto &b : bells) {
+        knownPairs.insert(b.pairNumber);
+    }
+
+    QMap<int, QList<ScheduleRecord>> bySlot;
+    for (const auto &r : records) {
+        bySlot[r.dayOfWeek * 100 + r.pairNumber].append(r);
+        if (!knownPairs.contains(r.pairNumber)) {
+            result.append(Conflict{"Дзвінки", r.dayOfWeek, r.pairNumber,
+                                   QString("Група %1: «%2» призначено на пару, якої немає в розкладі дзвінків.")
+                                       .arg(r.groupName, r.subjectName),
+                                   r.groupId});
+        }
+    }
+
+    for (auto it = bySlot.constBegin(); it != bySlot.constEnd(); ++it) {
+        const auto &list = it.value();
+        const int day = it.key() / 100;
+        const int pair = it.key() % 100;
+
+        for (int i = 0; i < list.size(); ++i) {
+            for (int j = i + 1; j < list.size(); ++j) {
+                const auto &a = list[i];
+                const auto &b = list[j];
+                if (!weeksOverlap(a, b)) continue;
+
+                const int week = a.weekType != 0 ? a.weekType : b.weekType;
+                const QString note = week > 0 ? QString(" [%1 тиждень]").arg(week) : QString();
+
+                if (a.teacherId == b.teacherId) {
+                    result.append(Conflict{"Викладач", day, pair,
+                                           QString("%1 веде пари одночасно: група %2 та група %3.%4")
+                                               .arg(a.teacherName, a.groupName, b.groupName, note),
+                                           a.groupId});
+                }
+                if (a.classroomId == b.classroomId) {
+                    result.append(Conflict{"Аудиторія", day, pair,
+                                           QString("Аудиторія %1 зайнята одночасно: група %2 та група %3.%4")
+                                               .arg(a.roomNumber, a.groupName, b.groupName, note),
+                                           a.groupId});
+                }
+                if (a.groupId == b.groupId) {
+                    result.append(Conflict{"Група", day, pair,
+                                           QString("Група %1 має дві пари одночасно: «%2» та «%3».%4")
+                                               .arg(a.groupName, a.subjectName, b.subjectName, note),
+                                           a.groupId});
+                }
+            }
+        }
+    }
+    return result;
+}
+
+inline RoomLoad computeRoomLoad(const QList<ScheduleRecord> &records, int pairsPerDay, int weekType, int cycle) {
+    QList<int> weeks;
+    if (weekType == 0) {
+        for (int w = 1; w <= cycle; ++w) weeks << w;
+    } else {
+        weeks << weekType;
+    }
+
+    double totalSlots = 0;
+    for (int w : weeks) {
+        QSet<int> usedSlots;
+        for (const auto &r : records) {
+            if (occupies(r, w)) usedSlots.insert(r.dayOfWeek * 100 + r.pairNumber);
+        }
+        totalSlots += usedSlots.size();
+    }
+
+    RoomLoad load;
+    load.busyPairs = totalSlots / weeks.size();
+    const double capacity = 5.0 * qMax(1, pairsPerDay);
+    load.percent = load.busyPairs / capacity * 100.0;
+    return load;
 }
 
 inline Load computeLoad(const QList<ScheduleRecord> &records, const QMap<int, double> &hoursByPair, int weekType, int cycle) {

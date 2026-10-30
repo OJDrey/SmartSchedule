@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "databasemanager.h"
 #include "theme.h"
+#include "version.h"
 #include <QApplication>
 #include <QDir>
 #include <QStandardPaths>
@@ -10,6 +11,7 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     a.setApplicationName("SmartSchedule");
+    a.setApplicationVersion(APP_VERSION);
     ThemeManager::apply(ThemeManager::saved());
 
     const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

@@ -1,4 +1,5 @@
 #include "workloaddialog.h"
+#include "entityscheduledialog.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QHeaderView>
@@ -13,10 +14,6 @@ constexpr int LabelWidth = 190;
 constexpr int RowHeight = 28;
 constexpr int TitleHeight = 30;
 constexpr int ValueWidth = 56;
-
-QString pairHeader(const BellItem &b) {
-    return QString("%1 пара").arg(b.pairNumber) + kNewLine + QString("%1 - %2").arg(b.startTime, b.endTime);
-}
 }
 
 BarChartWidget::BarChartWidget(QWidget *parent) : QWidget(parent) {
@@ -24,8 +21,11 @@ BarChartWidget::BarChartWidget(QWidget *parent) : QWidget(parent) {
     setBackgroundRole(QPalette::Base);
 }
 
-void BarChartWidget::setData(const QString &title, const QStringList &labels, const QList<double> &values) {
+void BarChartWidget::setData(const QString &title, const QStringList &labels, const QList<double> &values,
+                             const QString &suffix, double fixedMax) {
     m_title = title;
+    m_suffix = suffix;
+    m_fixedMax = fixedMax;
     m_labels = labels;
     m_values = values;
     setMinimumHeight(TitleHeight + 2 * Margin + static_cast<int>(m_values.size()) * RowHeight);
@@ -48,7 +48,7 @@ void BarChartWidget::paintEvent(QPaintEvent *) {
         return;
     }
 
-    double maxValue = *std::max_element(m_values.cbegin(), m_values.cend());
+    double maxValue = m_fixedMax > 0 ? m_fixedMax : *std::max_element(m_values.cbegin(), m_values.cend());
     if (maxValue <= 0) maxValue = 1;
 
     const int barsLeft = Margin + LabelWidth + Margin;
@@ -69,106 +69,8 @@ void BarChartWidget::paintEvent(QPaintEvent *) {
         p.fillRect(bar, palette().highlight());
 
         p.drawText(QRect(bar.right() + 6, y, ValueWidth, RowHeight), Qt::AlignVCenter | Qt::AlignLeft,
-                   QString::number(m_values[i], 'f', 1));
+                   QString::number(m_values[i], 'f', 1) + m_suffix);
     }
-}
-
-TeacherScheduleDialog::TeacherScheduleDialog(int teacherId, const QString &teacherName, QWidget *parent)
-    : QDialog(parent), m_teacherId(teacherId)
-{
-    setWindowTitle("Розклад викладача: " + teacherName);
-    resize(980, 620);
-
-    m_weekCombo = new QComboBox(this);
-    m_weekCombo->addItem("📅 Усі тижні", 0);
-    for (int w = 1; w <= 4; ++w) {
-        m_weekCombo->addItem(weekTypeName(w), w);
-    }
-
-    m_windowsLabel = new QLabel(this);
-    m_windowsLabel->setStyleSheet("font-weight: bold;");
-
-    m_tableWidget = new QTableWidget(0, 5, this);
-    m_tableWidget->setHorizontalHeaderLabels({"Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"});
-    m_tableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    m_tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    m_tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
-
-    m_delegate = new WindowsDelegate(m_tableWidget);
-    m_tableWidget->setItemDelegate(m_delegate);
-
-    auto *topLayout = new QHBoxLayout();
-    topLayout->addWidget(new QLabel("Фільтр тижня:", this));
-    topLayout->addWidget(m_weekCombo);
-    topLayout->addWidget(m_windowsLabel, 1);
-
-    auto *closeBtn = new QPushButton("Закрити", this);
-
-    auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->addLayout(topLayout);
-    mainLayout->addWidget(m_tableWidget);
-    mainLayout->addWidget(closeBtn);
-
-    connect(m_weekCombo, &QComboBox::currentIndexChanged, this, &TeacherScheduleDialog::reload);
-    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
-
-    reload();
-}
-
-void TeacherScheduleDialog::reload() {
-    m_tableWidget->clearContents();
-
-    auto &db = DatabaseManager::instance();
-    const auto bells = db.getBellSchedule();
-    m_tableWidget->setRowCount(bells.size());
-
-    QStringList headers;
-    for (const auto &b : bells) {
-        headers << pairHeader(b);
-    }
-    m_tableWidget->setVerticalHeaderLabels(headers);
-
-    const int week = m_weekCombo->currentData().toInt();
-    const auto records = db.getScheduleForTeacher(m_teacherId, week);
-
-    QMap<QPair<int, int>, QList<ScheduleRecord>> cells;
-    for (const auto &rec : records) {
-        cells[qMakePair(rec.pairNumber - 1, rec.dayOfWeek - 1)].append(rec);
-    }
-
-    const QString separator = QString(kNewLine) + "-----------------" + kNewLine;
-
-    for (auto it = cells.constBegin(); it != cells.constEnd(); ++it) {
-        const int row = it.key().first;
-        const int col = it.key().second;
-        const auto &list = it.value();
-        if (row < 0 || row >= bells.size() || col < 0 || col >= 5) continue;
-
-        QStringList lines;
-        for (const auto &rec : list) {
-            const QString prefix = rec.weekType > 0 ? QString("[%1 тижд] ").arg(rec.weekType) : QString();
-            lines << prefix + rec.subjectName + kNewLine + QString("Група: %1 | Ауд: %2").arg(rec.groupName, rec.roomNumber);
-        }
-
-        auto *item = new QTableWidgetItem(lines.join(separator));
-        item->setTextAlignment(Qt::AlignCenter);
-
-        QColor bgColor = list.size() > 1 ? QColor("#E3F2FD") : QColor(list.first().colorHex);
-        if (!bgColor.isValid()) bgColor = QColor("#4CAF50");
-        item->setBackground(bgColor);
-        item->setForeground(bgColor.lightness() < 128 ? Qt::white : Qt::black);
-
-        m_tableWidget->setItem(row, col, item);
-    }
-
-    m_delegate->windows.clear();
-    const auto windows = ScheduleAnalyzer::findWindows(records, week);
-    for (const auto &w : windows) {
-        m_delegate->windows.insert(WindowsDelegate::key(w.pair - 1, w.day - 1));
-    }
-    m_windowsLabel->setText(QString("Вікон у розкладі: %1").arg(windows.size()));
-    m_tableWidget->viewport()->update();
 }
 
 WorkloadDialog::WorkloadDialog(QWidget *parent) : QDialog(parent) {
@@ -304,6 +206,6 @@ void WorkloadDialog::onShowScheduleClicked() {
         return;
     }
 
-    TeacherScheduleDialog dlg(item->data(Qt::UserRole).toInt(), item->text(), this);
+    EntityScheduleDialog dlg(ViewMode::Teacher, item->data(Qt::UserRole).toInt(), item->text(), this);
     dlg.exec();
 }

@@ -15,32 +15,18 @@ class BarChartWidget : public QWidget {
 
 public:
     explicit BarChartWidget(QWidget *parent = nullptr);
-    void setData(const QString &title, const QStringList &labels, const QList<double> &values);
+    void setData(const QString &title, const QStringList &labels, const QList<double> &values,
+                 const QString &suffix = QString(), double fixedMax = 0);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
 
 private:
     QString m_title;
+    QString m_suffix;
     QStringList m_labels;
     QList<double> m_values;
-};
-
-class TeacherScheduleDialog : public QDialog {
-    Q_OBJECT
-
-public:
-    TeacherScheduleDialog(int teacherId, const QString &teacherName, QWidget *parent = nullptr);
-
-private slots:
-    void reload();
-
-private:
-    int m_teacherId;
-    QComboBox *m_weekCombo;
-    QLabel *m_windowsLabel;
-    QTableWidget *m_tableWidget;
-    WindowsDelegate *m_delegate;
+    double m_fixedMax = 0;
 };
 
 class WorkloadDialog : public QDialog {
