@@ -90,7 +90,9 @@ bool DatabaseManager::createTables() {
             FOREIGN KEY(teacher_id) REFERENCES teachers(id) ON DELETE CASCADE,
             FOREIGN KEY(classroom_id) REFERENCES classrooms(id) ON DELETE CASCADE);)",
         "CREATE INDEX IF NOT EXISTS idx_schedule_slot ON schedule(day_of_week, pair_number);",
-        "CREATE INDEX IF NOT EXISTS idx_schedule_group ON schedule(group_id);"
+        "CREATE INDEX IF NOT EXISTS idx_schedule_group ON schedule(group_id);",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_teacher ON schedule(teacher_id);",
+        "CREATE INDEX IF NOT EXISTS idx_schedule_room ON schedule(classroom_id);"
     };
 
     QSqlQuery query(m_db);
@@ -450,23 +452,30 @@ bool DatabaseManager::getScheduleRecord(int recordId, ScheduleRecord &outRecord)
     return true;
 }
 
-QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int weekType) {
+QList<ScheduleRecord> DatabaseManager::loadSchedule(const QString &filterColumn, int filterId, int weekType) {
     QList<ScheduleRecord> list;
-    QSqlQuery query(m_db);
-    query.prepare(R"(
+
+    QString sql = R"SQL(
         SELECT s.id, s.group_id, s.subject_id, s.teacher_id, s.classroom_id,
                s.day_of_week, s.pair_number, s.week_type,
-               sub.name, t.full_name, c.room_number, sub.color_hex
+               sub.name, t.full_name, c.room_number, sub.color_hex, g.name
         FROM schedule s
         JOIN subjects sub ON s.subject_id = sub.id
         JOIN teachers t ON s.teacher_id = t.id
         JOIN classrooms c ON s.classroom_id = c.id
-        WHERE s.group_id = :g_id AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type)
-        ORDER BY s.day_of_week, s.pair_number, s.week_type;
-    )");
-    query.bindValue(":g_id", groupId);
+        JOIN groups g ON s.group_id = g.id
+        WHERE (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type)
+    )SQL";
+    if (!filterColumn.isEmpty()) {
+        sql += QString(" AND %1 = :filter").arg(filterColumn);
+    }
+    sql += " ORDER BY s.day_of_week, s.pair_number, s.week_type;";
+
+    QSqlQuery query(m_db);
+    query.prepare(sql);
     query.bindValue(":w_all", weekType);
     query.bindValue(":w_type", weekType);
+    if (!filterColumn.isEmpty()) query.bindValue(":filter", filterId);
 
     if (!query.exec()) {
         qDebug() << "Помилка завантаження розкладу:" << query.lastError().text();
@@ -487,51 +496,54 @@ QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int week
         r.teacherName = query.value(9).toString();
         r.roomNumber = query.value(10).toString();
         r.colorHex = query.value(11).toString();
+        r.groupName = query.value(12).toString();
         list.append(r);
     }
     return list;
 }
 
+QList<ScheduleRecord> DatabaseManager::getScheduleForEntity(Entity entity, int id, int weekType) {
+    switch (entity) {
+    case Entity::Group: return loadSchedule("s.group_id", id, weekType);
+    case Entity::Teacher: return loadSchedule("s.teacher_id", id, weekType);
+    case Entity::Classroom: return loadSchedule("s.classroom_id", id, weekType);
+    default: return loadSchedule("s.subject_id", id, weekType);
+    }
+}
+
+QList<ScheduleRecord> DatabaseManager::getScheduleForGroup(int groupId, int weekType) {
+    return loadSchedule("s.group_id", groupId, weekType);
+}
+
 QList<ScheduleRecord> DatabaseManager::getScheduleForTeacher(int teacherId, int weekType) {
-    QList<ScheduleRecord> list;
+    return loadSchedule("s.teacher_id", teacherId, weekType);
+}
+
+QList<ScheduleRecord> DatabaseManager::getScheduleForClassroom(int classroomId, int weekType) {
+    return loadSchedule("s.classroom_id", classroomId, weekType);
+}
+
+QList<ScheduleRecord> DatabaseManager::getAllScheduleRecords() {
+    return loadSchedule(QString(), 0, 0);
+}
+
+bool DatabaseManager::deleteScheduleForGroup(int groupId) {
     QSqlQuery query(m_db);
-    query.prepare(R"(
-        SELECT s.id, s.group_id, s.subject_id, s.teacher_id, s.classroom_id,
-               s.day_of_week, s.pair_number, s.week_type,
-               sub.name, c.room_number, sub.color_hex, g.name
-        FROM schedule s
-        JOIN subjects sub ON s.subject_id = sub.id
-        JOIN classrooms c ON s.classroom_id = c.id
-        JOIN groups g ON s.group_id = g.id
-        WHERE s.teacher_id = :t_id AND (s.week_type = 0 OR :w_all = 0 OR s.week_type = :w_type)
-        ORDER BY s.day_of_week, s.pair_number, s.week_type;
-    )");
-    query.bindValue(":t_id", teacherId);
-    query.bindValue(":w_all", weekType);
-    query.bindValue(":w_type", weekType);
+    query.prepare("DELETE FROM schedule WHERE group_id = :id;");
+    query.bindValue(":id", groupId);
+    return query.exec();
+}
 
-    if (!query.exec()) {
-        qDebug() << "Помилка завантаження розкладу викладача:" << query.lastError().text();
-        return list;
-    }
+bool DatabaseManager::beginTransaction() {
+    return m_db.transaction();
+}
 
-    while (query.next()) {
-        ScheduleRecord r;
-        r.id = query.value(0).toInt();
-        r.groupId = query.value(1).toInt();
-        r.subjectId = query.value(2).toInt();
-        r.teacherId = query.value(3).toInt();
-        r.classroomId = query.value(4).toInt();
-        r.dayOfWeek = query.value(5).toInt();
-        r.pairNumber = query.value(6).toInt();
-        r.weekType = query.value(7).toInt();
-        r.subjectName = query.value(8).toString();
-        r.roomNumber = query.value(9).toString();
-        r.colorHex = query.value(10).toString();
-        r.groupName = query.value(11).toString();
-        list.append(r);
-    }
-    return list;
+bool DatabaseManager::commitTransaction() {
+    return m_db.commit();
+}
+
+void DatabaseManager::rollbackTransaction() {
+    m_db.rollback();
 }
 
 bool DatabaseManager::deleteScheduleRecord(int recordId) {

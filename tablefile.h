@@ -12,6 +12,11 @@
 
 namespace TableFile {
 
+struct Sheet {
+    QString name;
+    QList<QStringList> rows;
+};
+
 inline bool isXlsx(const QString &path) {
     return path.endsWith(".xlsx", Qt::CaseInsensitive);
 }
@@ -20,15 +25,7 @@ inline bool hasKnownSuffix(const QString &path) {
     return isXlsx(path) || path.endsWith(".csv", Qt::CaseInsensitive);
 }
 
-inline QList<QStringList> read(const QString &path, QString &error) {
-    if (!isXlsx(path)) return Csv::read(path, error);
-
-    QXlsx::Document doc(path);
-    if (!doc.load()) {
-        error = "Не вдалося відкрити файл Excel.";
-        return {};
-    }
-
+inline QList<QStringList> readCurrentSheet(QXlsx::Document &doc) {
     const QXlsx::CellRange range = doc.dimension();
     if (!range.isValid()) return {};
 
@@ -46,11 +43,34 @@ inline QList<QStringList> read(const QString &path, QString &error) {
     return rows;
 }
 
-inline bool write(const QString &path, const QList<QStringList> &rows, QString &error) {
-    if (!isXlsx(path)) return Csv::write(path, rows, error);
+inline QList<QStringList> read(const QString &path, QString &error) {
+    if (!isXlsx(path)) return Csv::read(path, error);
 
-    QXlsx::Document doc;
+    QXlsx::Document doc(path);
+    if (!doc.load()) {
+        error = "Не вдалося відкрити файл Excel.";
+        return {};
+    }
+    return readCurrentSheet(doc);
+}
 
+inline QList<QStringList> readSheet(const QString &path, const QString &sheetName, QString &error) {
+    if (!isXlsx(path)) return Csv::read(path, error);
+
+    QXlsx::Document doc(path);
+    if (!doc.load()) {
+        error = "Не вдалося відкрити файл Excel.";
+        return {};
+    }
+    if (!doc.sheetNames().contains(sheetName)) {
+        error = QString("Аркуш «%1» не знайдено. Імпортуйте файл, експортований цією програмою.").arg(sheetName);
+        return {};
+    }
+    doc.selectSheet(sheetName);
+    return readCurrentSheet(doc);
+}
+
+inline void writeRows(QXlsx::Document &doc, const QList<QStringList> &rows) {
     QXlsx::Format headerFormat;
     headerFormat.setFontBold(true);
     headerFormat.setBorderStyle(QXlsx::Format::BorderThin);
@@ -76,12 +96,33 @@ inline bool write(const QString &path, const QList<QStringList> &rows, QString &
     for (int c = 0; c < widths.size(); ++c) {
         doc.setColumnWidth(c + 1, widths[c]);
     }
+}
+
+inline bool writeSheets(const QString &path, const QList<Sheet> &sheets, QString &error) {
+    if (sheets.isEmpty()) {
+        error = "Немає даних для запису.";
+        return false;
+    }
+    if (!isXlsx(path)) return Csv::write(path, sheets.first().rows, error);
+
+    QXlsx::Document doc;
+    const QString defaultSheet = doc.sheetNames().value(0);
+    for (const auto &sheet : sheets) {
+        doc.addSheet(sheet.name);
+        writeRows(doc, sheet.rows);
+    }
+    doc.deleteSheet(defaultSheet);
+    doc.selectSheet(sheets.first().name);
 
     if (!doc.saveAs(path)) {
         error = "не вдалося записати файл Excel.";
         return false;
     }
     return true;
+}
+
+inline bool write(const QString &path, const QList<QStringList> &rows, QString &error) {
+    return writeSheets(path, {Sheet{"Аркуш1", rows}}, error);
 }
 
 }

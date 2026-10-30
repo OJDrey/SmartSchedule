@@ -11,12 +11,19 @@
 #include <QInputDialog>
 #include "databasemanager.h"
 
+struct EntryPreset {
+    int day = 0;
+    int pair = 0;
+    int teacherId = 0;
+    int classroomId = 0;
+};
+
 class AddEntryDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit AddEntryDialog(int currentGroupId, QWidget *parent = nullptr, int editRecordId = 0,
-                            int presetDay = 0, int presetPair = 0);
+    explicit AddEntryDialog(int groupId, QWidget *parent = nullptr, int editRecordId = 0,
+                            const EntryPreset &preset = EntryPreset());
     ScheduleRecord getRecord() const;
 
 private slots:
@@ -26,6 +33,7 @@ private slots:
 private:
     int m_groupId;
     int m_recordId;
+    QComboBox *m_groupCombo = nullptr;
     QComboBox *m_dayCombo;
     QComboBox *m_pairCombo;
     QComboBox *m_weekTypeCombo;

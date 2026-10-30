@@ -1,20 +1,20 @@
 #include "mainwindow.h"
 #include "tablefile.h"
 #include "theme.h"
+#include "schedulehtml.h"
+#include "scheduleimporter.h"
+#include "importscheduledialog.h"
+#include "conflictreportdialog.h"
+#include "roomloaddialog.h"
+#include "workloaddialog.h"
+#include "version.h"
 #include <QActionGroup>
 #include <QFileDialog>
-#include <QPdfWriter>
-#include <QPageSize>
-#include <QPageLayout>
-#include <QTextDocument>
 #include <QPrinter>
 #include <QPrintPreviewDialog>
 
 namespace {
-constexpr int IdsRole = Qt::UserRole;
-constexpr int LabelsRole = Qt::UserRole + 1;
 constexpr int DaysCount = 5;
-const QStringList DayNames = {"Понеділок", "Вівторок", "Середа", "Четвер", "П'ятниця"};
 
 ReferenceConfig makeConfig(const QString &title,
                            const QList<ReferenceField> &fields,
@@ -39,65 +39,65 @@ ReferenceConfig makeConfig(const QString &title,
 ReferenceConfig groupsConfig()
 {
     return makeConfig("Керування групами",
-                      {{"Назва групи", ReferenceField::Text}},
-                      Entity::Group,
-                      [] {
-                          QList<ReferenceRow> rows;
-                          for (const auto &g : DatabaseManager::instance().getGroups())
-                              rows.append(ReferenceRow{g.id, {g.name}});
-                          return rows;
-                      },
-                      [](int id, const QStringList &v, QString &error) {
-                          return DatabaseManager::instance().saveGroup(id, v[0], error);
-                      });
+        {{"Назва групи", ReferenceField::Text}},
+        Entity::Group,
+        [] {
+            QList<ReferenceRow> rows;
+            for (const auto &g : DatabaseManager::instance().getGroups())
+                rows.append(ReferenceRow{g.id, {g.name}});
+            return rows;
+        },
+        [](int id, const QStringList &v, QString &error) {
+            return DatabaseManager::instance().saveGroup(id, v[0], error);
+        });
 }
 
 ReferenceConfig subjectsConfig()
 {
     return makeConfig("Керування предметами",
-                      {{"Назва предмета", ReferenceField::Text}, {"Колір", ReferenceField::Color}},
-                      Entity::Subject,
-                      [] {
-                          QList<ReferenceRow> rows;
-                          for (const auto &s : DatabaseManager::instance().getSubjects())
-                              rows.append(ReferenceRow{s.id, {s.name, s.colorHex}});
-                          return rows;
-                      },
-                      [](int id, const QStringList &v, QString &error) {
-                          return DatabaseManager::instance().saveSubject(id, v[0], v[1], error);
-                      });
+        {{"Назва предмета", ReferenceField::Text}, {"Колір", ReferenceField::Color}},
+        Entity::Subject,
+        [] {
+            QList<ReferenceRow> rows;
+            for (const auto &s : DatabaseManager::instance().getSubjects())
+                rows.append(ReferenceRow{s.id, {s.name, s.colorHex}});
+            return rows;
+        },
+        [](int id, const QStringList &v, QString &error) {
+            return DatabaseManager::instance().saveSubject(id, v[0], v[1], error);
+        });
 }
 
 ReferenceConfig teachersConfig()
 {
     return makeConfig("Керування викладачами",
-                      {{"ПІБ викладача", ReferenceField::Text}, {"Кафедра", ReferenceField::Text}},
-                      Entity::Teacher,
-                      [] {
-                          QList<ReferenceRow> rows;
-                          for (const auto &t : DatabaseManager::instance().getTeachers())
-                              rows.append(ReferenceRow{t.id, {t.name, t.department}});
-                          return rows;
-                      },
-                      [](int id, const QStringList &v, QString &error) {
-                          return DatabaseManager::instance().saveTeacher(id, v[0], v[1], error);
-                      });
+        {{"ПІБ викладача", ReferenceField::Text}, {"Кафедра", ReferenceField::Text}},
+        Entity::Teacher,
+        [] {
+            QList<ReferenceRow> rows;
+            for (const auto &t : DatabaseManager::instance().getTeachers())
+                rows.append(ReferenceRow{t.id, {t.name, t.department}});
+            return rows;
+        },
+        [](int id, const QStringList &v, QString &error) {
+            return DatabaseManager::instance().saveTeacher(id, v[0], v[1], error);
+        });
 }
 
 ReferenceConfig classroomsConfig()
 {
     return makeConfig("Керування аудиторіями",
-                      {{"Номер аудиторії", ReferenceField::Text}, {"Місткість", ReferenceField::Number}},
-                      Entity::Classroom,
-                      [] {
-                          QList<ReferenceRow> rows;
-                          for (const auto &c : DatabaseManager::instance().getClassrooms())
-                              rows.append(ReferenceRow{c.id, {c.roomNumber, QString::number(c.capacity)}});
-                          return rows;
-                      },
-                      [](int id, const QStringList &v, QString &error) {
-                          return DatabaseManager::instance().saveClassroom(id, v[0], v[1].toInt(), error);
-                      });
+        {{"Номер аудиторії", ReferenceField::Text}, {"Місткість", ReferenceField::Number}},
+        Entity::Classroom,
+        [] {
+            QList<ReferenceRow> rows;
+            for (const auto &c : DatabaseManager::instance().getClassrooms())
+                rows.append(ReferenceRow{c.id, {c.roomNumber, QString::number(c.capacity)}});
+            return rows;
+        },
+        [](int id, const QStringList &v, QString &error) {
+            return DatabaseManager::instance().saveClassroom(id, v[0], v[1].toInt(), error);
+        });
 }
 }
 
@@ -105,12 +105,12 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setupUi();
-    loadGroups();
+    loadEntities(0);
 
     auto *timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [this] {
         updateCurrentWeekInfo();
-        updateHighlight();
+        m_grid->refreshHighlight();
     });
     timer->start(60 * 1000);
 }
@@ -127,7 +127,13 @@ void MainWindow::setupUi() {
                                      "background: palette(highlight); color: palette(highlighted-text);");
     updateCurrentWeekInfo();
 
-    m_groupCombo = new QComboBox(this);
+    m_modeCombo = new QComboBox(this);
+    m_modeCombo->addItem("🎓 Група", 0);
+    m_modeCombo->addItem("👨‍🏫 Викладач", 1);
+    m_modeCombo->addItem("🚪 Аудиторія", 2);
+
+    m_entityLabel = new QLabel("Група:", this);
+    m_entityCombo = new QComboBox(this);
 
     m_weekFilterCombo = new QComboBox(this);
     m_weekFilterCombo->addItem("📅 Усі тижні (Повний розклад)", 0);
@@ -135,51 +141,54 @@ void MainWindow::setupUi() {
         m_weekFilterCombo->addItem(weekTypeName(w), w);
     }
 
-    m_addBtn = new QPushButton("➕ Додати пару", this);
-    m_deleteBtn = new QPushButton("❌ Видалити обрану пару", this);
-
-    auto *topLayout = new QHBoxLayout();
-    topLayout->addWidget(new QLabel("Група:", this));
-    topLayout->addWidget(m_groupCombo, 1);
-    topLayout->addWidget(new QLabel("Фільтр тижня:", this));
     m_windowsCheck = new QCheckBox("🕳️ Показати вікна", this);
     m_windowsLabel = new QLabel(this);
     m_windowsLabel->setStyleSheet("font-weight: bold;");
 
+    m_addBtn = new QPushButton("➕ Додати пару", this);
+    m_deleteBtn = new QPushButton("❌ Видалити пару", this);
+
+    auto *topLayout = new QHBoxLayout();
+    topLayout->addWidget(new QLabel("Перегляд:", this));
+    topLayout->addWidget(m_modeCombo);
+    topLayout->addWidget(m_entityLabel);
+    topLayout->addWidget(m_entityCombo, 1);
+    topLayout->addWidget(new QLabel("Тиждень:", this));
     topLayout->addWidget(m_weekFilterCombo);
     topLayout->addWidget(m_windowsCheck);
     topLayout->addWidget(m_windowsLabel);
     topLayout->addWidget(m_addBtn);
     topLayout->addWidget(m_deleteBtn);
 
-    m_tableWidget = new QTableWidget(0, DaysCount, this);
-    m_tableWidget->setHorizontalHeaderLabels(DayNames);
-    m_tableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    m_tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    m_tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
-
-    m_delegate = new HighlightDelegate(m_tableWidget);
-    m_tableWidget->setItemDelegate(m_delegate);
+    m_filterBar = new FilterBar(this);
+    m_grid = new ScheduleGrid(this);
 
     mainLayout->addWidget(m_statusWeekLabel);
     mainLayout->addLayout(topLayout);
-    mainLayout->addWidget(m_tableWidget);
+    mainLayout->addWidget(m_filterBar);
+    mainLayout->addWidget(m_grid);
 
-    connect(m_groupCombo, &QComboBox::currentIndexChanged, this, &MainWindow::refreshScheduleTable);
+    connect(m_modeCombo, &QComboBox::currentIndexChanged, this, &MainWindow::onModeChanged);
+    connect(m_entityCombo, &QComboBox::currentIndexChanged, this, &MainWindow::refreshScheduleTable);
     connect(m_weekFilterCombo, &QComboBox::currentIndexChanged, this, &MainWindow::refreshScheduleTable);
     connect(m_windowsCheck, &QCheckBox::toggled, this, &MainWindow::refreshScheduleTable);
+    connect(m_filterBar, &FilterBar::filterChanged, this, &MainWindow::refreshScheduleTable);
     connect(m_addBtn, &QPushButton::clicked, this, &MainWindow::onAddEntryClicked);
     connect(m_deleteBtn, &QPushButton::clicked, this, &MainWindow::onDeleteEntryClicked);
-    connect(m_tableWidget, &QTableWidget::cellDoubleClicked, this, &MainWindow::onCellDoubleClicked);
+    connect(m_grid, &QTableWidget::cellDoubleClicked, this, &MainWindow::onCellDoubleClicked);
 }
 
 void MainWindow::setupMenus() {
     QMenu *fileMenu = menuBar()->addMenu("📁 Файл");
-    fileMenu->addAction("📄 Експорт у PDF...", this, &MainWindow::onExportPdf);
-    fileMenu->addAction("📊 Експорт в Excel / CSV...", this, &MainWindow::onExportTable);
-    QAction *printAction = fileMenu->addAction("🖨️ Друк / попередній перегляд...", this, &MainWindow::onPrint);
+    fileMenu->addAction("📄 Експорт поточного розкладу у PDF...", this, &MainWindow::onExportPdf);
+    fileMenu->addAction("📚 Експорт розкладів усіх груп в один PDF...", this, &MainWindow::onExportAllGroupsPdf);
+    fileMenu->addAction("📊 Експорт поточного розкладу в Excel / CSV...", this, &MainWindow::onExportTable);
+    fileMenu->addAction("🗃️ Експорт розкладу всіх груп (дані для імпорту)...", this, &MainWindow::onExportAllData);
+    fileMenu->addAction("📥 Імпорт розкладу з Excel / CSV...", this, &MainWindow::onImportSchedule);
+    fileMenu->addSeparator();
+    QAction *printAction = fileMenu->addAction("🖨️ Друк поточного розкладу...", this, &MainWindow::onPrint);
     printAction->setShortcut(QKeySequence::Print);
+    fileMenu->addAction("🖨️ Друк розкладів усіх груп...", this, &MainWindow::onPrintAllGroups);
     fileMenu->addSeparator();
     fileMenu->addAction("💾 Резервна копія бази даних...", this, &MainWindow::onBackupDatabase);
     fileMenu->addAction("♻️ Відновити базу з копії...", this, &MainWindow::onRestoreDatabase);
@@ -196,6 +205,8 @@ void MainWindow::setupMenus() {
 
     QMenu *reportsMenu = menuBar()->addMenu("📈 Звіти");
     reportsMenu->addAction("👨‍🏫 Навантаження викладачів...", this, &MainWindow::onShowWorkload);
+    reportsMenu->addAction("🚪 Завантаженість аудиторій...", this, &MainWindow::onShowRoomLoad);
+    reportsMenu->addAction("⚠️ Перевірка конфліктів розкладу...", this, &MainWindow::onShowConflicts);
 
     QMenu *settingsMenu = menuBar()->addMenu("⚙️ Налаштування");
     QMenu *themeMenu = settingsMenu->addMenu("🎨 Тема оформлення");
@@ -229,14 +240,69 @@ void MainWindow::addReferenceAction(QMenu *menu, const QString &text, std::funct
     menu->addAction(text, this, [this, makeConfig] {
         ReferenceDialog dlg(makeConfig(), this);
         dlg.exec();
-        loadGroups();
+        loadEntities(currentEntityId());
     });
 }
 
-bool MainWindow::ensureGroupSelected() {
-    if (m_groupCombo->currentData().toInt() > 0) return true;
-    QMessageBox::warning(this, "Увага", "Будь ласка, оберіть групу!");
+ViewMode MainWindow::currentMode() const {
+    return static_cast<ViewMode>(m_modeCombo->currentData().toInt());
+}
+
+int MainWindow::currentEntityId() const {
+    return m_entityCombo->currentData().toInt();
+}
+
+bool MainWindow::ensureEntitySelected() {
+    if (currentEntityId() > 0) return true;
+    QMessageBox::warning(this, "Увага", "Список порожній або нічого не вибрано. Додайте записи у меню «Керування даними».");
     return false;
+}
+
+void MainWindow::onModeChanged() {
+    m_lastIds[m_previousMode] = currentEntityId();
+    m_previousMode = m_modeCombo->currentIndex();
+    loadEntities(m_lastIds[m_previousMode]);
+}
+
+void MainWindow::loadEntities(int preferredId) {
+    const ViewMode mode = currentMode();
+    auto &db = DatabaseManager::instance();
+
+    {
+        const QSignalBlocker blocker(m_entityCombo);
+        m_entityCombo->clear();
+
+        switch (mode) {
+        case ViewMode::Group:
+            m_entityLabel->setText("Група:");
+            for (const auto &g : db.getGroups()) m_entityCombo->addItem(g.name, g.id);
+            break;
+        case ViewMode::Teacher:
+            m_entityLabel->setText("Викладач:");
+            for (const auto &t : db.getTeachers()) m_entityCombo->addItem(t.name, t.id);
+            break;
+        case ViewMode::Classroom:
+            m_entityLabel->setText("Аудиторія:");
+            for (const auto &r : db.getClassrooms()) m_entityCombo->addItem(QString("Ауд. %1").arg(r.roomNumber), r.id);
+            break;
+        }
+
+        const int index = m_entityCombo->findData(preferredId);
+        if (index >= 0) m_entityCombo->setCurrentIndex(index);
+    }
+
+    m_windowsCheck->setEnabled(mode != ViewMode::Classroom);
+    m_filterBar->reloadLists();
+    refreshScheduleTable();
+}
+
+void MainWindow::showGroup(int groupId) {
+    m_lastIds[0] = groupId;
+    if (m_modeCombo->currentIndex() != 0) {
+        m_modeCombo->setCurrentIndex(0);
+    } else {
+        loadEntities(groupId);
+    }
 }
 
 void MainWindow::updateCurrentWeekInfo() {
@@ -248,50 +314,87 @@ void MainWindow::updateCurrentWeekInfo() {
                                         weekTypeName(isNumerator ? 1 : 2)));
 }
 
-void MainWindow::updateHighlight() {
-    const int dayOfWeek = QDate::currentDate().dayOfWeek();
-    const int todayColumn = dayOfWeek <= DaysCount ? dayOfWeek - 1 : -1;
+void MainWindow::refreshScheduleTable() {
+    const ViewMode mode = currentMode();
+    const int id = currentEntityId();
+    const int week = m_weekFilterCombo->currentData().toInt();
 
-    int currentRow = -1;
-    if (todayColumn >= 0) {
-        const QTime now = QTime::currentTime();
-        for (int i = 0; i < m_bells.size(); ++i) {
-            const QTime start = QTime::fromString(m_bells[i].startTime, "hh:mm");
-            const QTime end = QTime::fromString(m_bells[i].endTime, "hh:mm");
-            if (now >= start && now <= end) {
-                currentRow = i;
-                break;
-            }
-        }
-    }
+    m_bells = DatabaseManager::instance().getBellSchedule();
+    m_grid->setBells(m_bells);
 
-    QStringList days = DayNames;
-    if (todayColumn >= 0) days[todayColumn] = "▶ " + days[todayColumn] + " (сьогодні)";
-    m_tableWidget->setHorizontalHeaderLabels(days);
+    m_records = id > 0 ? DatabaseManager::instance().getScheduleForEntity(entityOf(mode), id, week)
+                       : QList<ScheduleRecord>();
 
-    QStringList pairs = m_pairHeaders;
-    if (currentRow >= 0 && currentRow < pairs.size()) pairs[currentRow] = "▶ " + pairs[currentRow];
-    m_tableWidget->setVerticalHeaderLabels(pairs);
-
-    m_delegate->todayColumn = todayColumn;
-    m_delegate->currentRow = currentRow;
-    m_tableWidget->viewport()->update();
+    const bool windows = m_windowsCheck->isChecked() && mode != ViewMode::Classroom;
+    m_grid->showRecords(m_records, mode, m_filterBar->filter(), windows, week);
+    m_windowsLabel->setText(windows ? QString("Вікон: %1").arg(m_grid->windowsCount()) : QString());
 }
 
-void MainWindow::loadGroups() {
-    {
-        const QSignalBlocker blocker(m_groupCombo);
-        const int previousId = m_groupCombo->currentData().toInt();
+int MainWindow::pickRecordId(int row, int column, const QString &title, const QString &prompt) {
+    const QVariantList ids = m_grid->recordIdsAt(row, column);
+    if (ids.isEmpty()) return 0;
+    if (ids.size() == 1) return ids.first().toInt();
 
-        m_groupCombo->clear();
-        for (const auto &g : DatabaseManager::instance().getGroups()) {
-            m_groupCombo->addItem(g.name, g.id);
-        }
+    const QStringList labels = m_grid->recordLabelsAt(row, column);
+    bool ok = false;
+    const QString chosen = QInputDialog::getItem(this, title, prompt, labels, 0, false, &ok);
+    if (!ok) return 0;
+    return ids.at(qMax(0, labels.indexOf(chosen))).toInt();
+}
 
-        const int index = m_groupCombo->findData(previousId);
-        if (index >= 0) m_groupCombo->setCurrentIndex(index);
+void MainWindow::openEntryDialog(int recordId, int day, int pair) {
+    const ViewMode mode = currentMode();
+    const int id = currentEntityId();
+
+    EntryPreset preset;
+    preset.day = day;
+    preset.pair = pair;
+    if (mode == ViewMode::Teacher) preset.teacherId = id;
+    if (mode == ViewMode::Classroom) preset.classroomId = id;
+
+    AddEntryDialog dlg(mode == ViewMode::Group ? id : 0, this, recordId, preset);
+    if (dlg.exec() == QDialog::Accepted) {
+        refreshScheduleTable();
     }
-    refreshScheduleTable();
+}
+
+void MainWindow::onAddEntryClicked() {
+    if (!ensureEntitySelected()) return;
+    openEntryDialog(0, 0, 0);
+}
+
+void MainWindow::onCellDoubleClicked(int row, int column) {
+    if (currentEntityId() <= 0) return;
+
+    int recordId = 0;
+    if (!m_grid->recordIdsAt(row, column).isEmpty()) {
+        recordId = pickRecordId(row, column, "Редагування", "Оберіть заняття для редагування:");
+        if (recordId <= 0) return;
+    }
+    openEntryDialog(recordId, column + 1, m_grid->pairNumberAt(row));
+}
+
+void MainWindow::onDeleteEntryClicked() {
+    const int row = m_grid->currentRow();
+    const int column = m_grid->currentColumn();
+    if (row < 0 || column < 0 || m_grid->recordIdsAt(row, column).isEmpty()) {
+        QMessageBox::information(this, "Видалення", "Будь ласка, оберіть комірку розкладу із заняттям для видалення.");
+        return;
+    }
+
+    const int recordId = pickRecordId(row, column, "Видалення", "Оберіть заняття для видалення:");
+    if (recordId <= 0) return;
+
+    const auto answer = QMessageBox::question(this, "Підтвердження",
+                                              "Ви дійсно бажаєте видалити обране заняття з розкладу?",
+                                              QMessageBox::Yes | QMessageBox::No);
+    if (answer != QMessageBox::Yes) return;
+
+    if (DatabaseManager::instance().deleteScheduleRecord(recordId)) {
+        refreshScheduleTable();
+    } else {
+        QMessageBox::critical(this, "Помилка", "Не вдалося видалити заняття.");
+    }
 }
 
 void MainWindow::onOpenBellsDialog() {
@@ -303,95 +406,110 @@ void MainWindow::onOpenBellsDialog() {
 
 void MainWindow::onOpenAboutDialog() {
     QMessageBox::about(this, "Про програму SmartSchedule",
-                       "<h2>SmartSchedule v14.0</h2>"
-                       "<p><b>Автоматизація розкладу занять навчального закладу</b></p>"
-                       "<p>Програма призначена для формування та керування навчальним розкладом, "
-                       "контролю часових конфліктів викладачів, аудиторій та груп, "
-                       "підтримки багатотижневих циклів занять (чисельник/знаменник), "
-                       "підбору вільних аудиторій, гнучкого налаштування розкладу дзвінків, "
-                       "експорту у PDF, Excel (.xlsx) та CSV, імпорту довідників, друку розкладу, аналізу навантаження викладачів, пошуку «вікон» та резервного копіювання бази даних.</p>"
-                       "<hr>"
-                       "<p><b>Технологічний стек:</b> C++17, Qt 6 (Qt Widgets), SQLite3, CMake</p>"
-                       "<p><b>Курсова робота з дисципліни:</b> «Системне програмування»</p>");
+                       QString("<h2>SmartSchedule v%1</h2>"
+                               "<p><b>Автоматизація розкладу занять навчального закладу</b></p>"
+                               "<p>Формування та керування розкладом, контроль конфліктів викладачів, аудиторій та груп, "
+                               "перегляд розкладу за групою, викладачем чи аудиторією, пошук і фільтри, "
+                               "підбір вільних аудиторій, пошук «вікон», аналіз навантаження викладачів та завантаженості аудиторій, "
+                               "звіт про конфлікти, експорт у PDF/Excel/CSV, імпорт розкладу з Excel, "
+                               "друк та резервне копіювання бази даних.</p>"
+                               "<hr>"
+                               "<p><b>Технологічний стек:</b> C++17, Qt 6 (Qt Widgets), SQLite3, QXlsx, CMake</p>"
+                               "<p><b>Курсова робота з дисципліни:</b> «Системне програмування»</p>")
+                           .arg(APP_VERSION));
 }
 
-QString MainWindow::buildScheduleHtml() const {
-    auto toHtml = [](const QString &text) {
-        return text.toHtmlEscaped().replace(kNewLine, "<br>");
-    };
+QString MainWindow::weekFilterTitle() const {
+    const int week = m_weekFilterCombo->currentData().toInt();
+    return week == 0 ? QString("Усі тижні (повний розклад)") : weekTypeName(week);
+}
 
-    QString html = QString("<h2 align='center'>Розклад групи %1</h2><p align='center'>%2</p>")
-                       .arg(m_groupCombo->currentText().toHtmlEscaped(), m_weekFilterCombo->currentText().toHtmlEscaped());
-    html += "<table border='1' cellspacing='0' cellpadding='4' width='100%'><tr><th></th>";
+QString MainWindow::currentHtml() const {
+    return ScheduleHtml::page(viewModeTitle(currentMode()) + " " + m_entityCombo->currentText(),
+                              weekFilterTitle(), m_bells, m_records, currentMode());
+}
 
-    for (const auto &day : DayNames) {
-        html += "<th>" + toHtml(day) + "</th>";
+QString MainWindow::allGroupsHtml() const {
+    auto &db = DatabaseManager::instance();
+    const int week = m_weekFilterCombo->currentData().toInt();
+    const auto bells = db.getBellSchedule();
+
+    QStringList pages;
+    for (const auto &g : db.getGroups()) {
+        pages << ScheduleHtml::page(viewModeTitle(ViewMode::Group) + " " + g.name, weekFilterTitle(), bells,
+                                    db.getScheduleForGroup(g.id, week), ViewMode::Group, !pages.isEmpty());
     }
-    html += "</tr>";
+    return pages.isEmpty() ? QString() : ScheduleHtml::document(pages);
+}
 
-    for (int r = 0; r < m_tableWidget->rowCount(); ++r) {
-        html += "<tr><td><b>" + toHtml(m_pairHeaders.value(r)) + "</b></td>";
-        for (int c = 0; c < DaysCount; ++c) {
-            const auto *item = m_tableWidget->item(r, c);
-            html += "<td align='center'>" + (item ? toHtml(item->text()) : QString()) + "</td>";
-        }
-        html += "</tr>";
-    }
-    html += "</table>";
-    return html;
+void MainWindow::showPrintPreview(const QString &html) {
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setPageOrientation(QPageLayout::Landscape);
+
+    QPrintPreviewDialog preview(&printer, this);
+    preview.resize(1000, 700);
+    connect(&preview, &QPrintPreviewDialog::paintRequested, this, [&html](QPrinter *p) {
+        ScheduleHtml::print(html, p);
+    });
+    preview.exec();
 }
 
 void MainWindow::onExportPdf() {
-    if (!ensureGroupSelected()) return;
+    if (!ensureEntitySelected()) return;
 
-    const QString path = QFileDialog::getSaveFileName(this, "Експорт розкладу",
-                                                      m_groupCombo->currentText() + ".pdf", "PDF (*.pdf)");
+    const QString path = QFileDialog::getSaveFileName(this, "Експорт розкладу", m_entityCombo->currentText() + ".pdf", "PDF (*.pdf)");
     if (path.isEmpty()) return;
 
-    QPdfWriter writer(path);
-    writer.setPageSize(QPageSize(QPageSize::A4));
-    writer.setPageOrientation(QPageLayout::Landscape);
-    writer.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout::Millimeter);
-
-    QTextDocument doc;
-    doc.setHtml(buildScheduleHtml());
-    doc.print(&writer);
-
-    QMessageBox::information(this, "Експорт", "Розклад успішно збережено у PDF.");
+    if (ScheduleHtml::savePdf(currentHtml(), path)) {
+        QMessageBox::information(this, "Експорт", "Розклад успішно збережено у PDF.");
+    } else {
+        QMessageBox::critical(this, "Помилка", "Не вдалося створити PDF-файл.");
+    }
 }
 
-QList<QStringList> MainWindow::scheduleRows() const {
-    QList<QStringList> rows;
-    rows.append(QStringList{"Група", m_groupCombo->currentText(), m_weekFilterCombo->currentText()});
-    rows.append(QStringList());
-
-    QStringList header{"Пара / час"};
-    header += DayNames;
-    rows.append(header);
-
-    for (int r = 0; r < m_tableWidget->rowCount(); ++r) {
-        QString pair = m_pairHeaders.value(r);
-        pair.replace(kNewLine, " ");
-
-        QStringList row{pair};
-        for (int c = 0; c < DaysCount; ++c) {
-            const auto *item = m_tableWidget->item(r, c);
-            row << (item ? item->text() : QString());
-        }
-        rows.append(row);
+void MainWindow::onExportAllGroupsPdf() {
+    const QString html = allGroupsHtml();
+    if (html.isEmpty()) {
+        QMessageBox::information(this, "Експорт", "Немає жодної групи для експорту.");
+        return;
     }
-    return rows;
+
+    const QString path = QFileDialog::getSaveFileName(this, "Експорт розкладів усіх груп", "Розклади_всіх_груп.pdf", "PDF (*.pdf)");
+    if (path.isEmpty()) return;
+
+    if (ScheduleHtml::savePdf(html, path)) {
+        QMessageBox::information(this, "Експорт", "Розклади всіх груп збережено в один PDF-файл.");
+    } else {
+        QMessageBox::critical(this, "Помилка", "Не вдалося створити PDF-файл.");
+    }
+}
+
+void MainWindow::onPrint() {
+    if (!ensureEntitySelected()) return;
+    showPrintPreview(currentHtml());
+}
+
+void MainWindow::onPrintAllGroups() {
+    const QString html = allGroupsHtml();
+    if (html.isEmpty()) {
+        QMessageBox::information(this, "Друк", "Немає жодної групи для друку.");
+        return;
+    }
+    showPrintPreview(html);
 }
 
 bool MainWindow::saveScheduleXlsx(const QString &path) const {
+    const ViewMode mode = currentMode();
     QXlsx::Document doc;
+    const QString defaultSheet = doc.sheetNames().value(0);
+    doc.addSheet("Розклад");
 
     QXlsx::Format titleFormat;
     titleFormat.setFontBold(true);
     titleFormat.setFontSize(14);
     titleFormat.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
 
-    const QString title = QString("Розклад групи %1 (%2)").arg(m_groupCombo->currentText(), m_weekFilterCombo->currentText());
+    const QString title = QString("%1 %2 (%3)").arg(viewModeTitle(mode), m_entityCombo->currentText(), weekFilterTitle());
     doc.write(1, 1, title, titleFormat);
     doc.mergeCells(QXlsx::CellRange(1, 1, 1, DaysCount + 1), titleFormat);
 
@@ -406,12 +524,12 @@ bool MainWindow::saveScheduleXlsx(const QString &path) const {
 
     doc.write(3, 1, QString("Пара / час"), headerFormat);
     for (int c = 0; c < DaysCount; ++c) {
-        doc.write(3, c + 2, DayNames.at(c), headerFormat);
+        doc.write(3, c + 2, scheduleDayNames().at(c), headerFormat);
     }
 
-    for (int r = 0; r < m_tableWidget->rowCount(); ++r) {
+    for (int r = 0; r < m_grid->rowCount(); ++r) {
         const int excelRow = r + 4;
-        doc.write(excelRow, 1, m_pairHeaders.value(r), headerFormat);
+        doc.write(excelRow, 1, m_grid->pairHeaderAt(r), headerFormat);
 
         for (int c = 0; c < DaysCount; ++c) {
             QXlsx::Format cellFormat;
@@ -421,7 +539,7 @@ bool MainWindow::saveScheduleXlsx(const QString &path) const {
             cellFormat.setBorderStyle(QXlsx::Format::BorderThin);
 
             QString text;
-            if (const auto *item = m_tableWidget->item(r, c)) {
+            if (const auto *item = m_grid->item(r, c)) {
                 text = item->text();
                 cellFormat.setFillPattern(QXlsx::Format::PatternSolid);
                 cellFormat.setPatternBackgroundColor(item->background().color());
@@ -434,14 +552,20 @@ bool MainWindow::saveScheduleXlsx(const QString &path) const {
 
     doc.setColumnWidth(1, 14);
     doc.setColumnWidth(2, DaysCount + 1, 34);
+
+    doc.addSheet("Дані");
+    TableFile::writeRows(doc, ScheduleImporter::toRows(m_records));
+    doc.deleteSheet(defaultSheet);
+    doc.selectSheet("Розклад");
+
     return doc.saveAs(path);
 }
 
 void MainWindow::onExportTable() {
-    if (!ensureGroupSelected()) return;
+    if (!ensureEntitySelected()) return;
 
     QString selectedFilter;
-    QString path = QFileDialog::getSaveFileName(this, "Експорт розкладу", m_groupCombo->currentText() + ".xlsx",
+    QString path = QFileDialog::getSaveFileName(this, "Експорт розкладу", m_entityCombo->currentText() + ".xlsx",
                                                 "Excel (*.xlsx);;CSV (*.csv)", &selectedFilter);
     if (path.isEmpty()) return;
     if (!TableFile::hasKnownSuffix(path)) path += selectedFilter.contains("csv") ? ".csv" : ".xlsx";
@@ -452,13 +576,42 @@ void MainWindow::onExportTable() {
         ok = saveScheduleXlsx(path);
         if (!ok) error = "не вдалося записати файл Excel.";
     } else {
-        ok = Csv::write(path, scheduleRows(), error);
+        ok = Csv::write(path, ScheduleImporter::toRows(m_records), error);
     }
 
     if (ok) {
-        QMessageBox::information(this, "Експорт", "Розклад успішно збережено.");
+        QMessageBox::information(this, "Експорт", "Розклад успішно збережено. Файл містить дані для зворотного імпорту.");
     } else {
         QMessageBox::critical(this, "Помилка", "Не вдалося зберегти файл: " + error);
+    }
+}
+
+void MainWindow::onExportAllData() {
+    const auto records = DatabaseManager::instance().getAllScheduleRecords();
+    if (records.isEmpty()) {
+        QMessageBox::information(this, "Експорт", "Розклад порожній, експортувати нічого.");
+        return;
+    }
+
+    QString selectedFilter;
+    QString path = QFileDialog::getSaveFileName(this, "Експорт розкладу всіх груп", "Розклад_всіх_груп.xlsx",
+                                                "Excel (*.xlsx);;CSV (*.csv)", &selectedFilter);
+    if (path.isEmpty()) return;
+    if (!TableFile::hasKnownSuffix(path)) path += selectedFilter.contains("csv") ? ".csv" : ".xlsx";
+
+    QString error;
+    const TableFile::Sheet sheet{"Дані", ScheduleImporter::toRows(records)};
+    if (TableFile::writeSheets(path, {sheet}, error)) {
+        QMessageBox::information(this, "Експорт", QString("Збережено пар: %1.").arg(records.size()));
+    } else {
+        QMessageBox::critical(this, "Помилка", "Не вдалося зберегти файл: " + error);
+    }
+}
+
+void MainWindow::onImportSchedule() {
+    ImportScheduleDialog dlg(this);
+    if (dlg.exec() == QDialog::Accepted) {
+        loadEntities(currentEntityId());
     }
 }
 
@@ -467,9 +620,22 @@ void MainWindow::onShowWorkload() {
     dlg.exec();
 }
 
+void MainWindow::onShowRoomLoad() {
+    RoomLoadDialog dlg(this);
+    dlg.exec();
+}
+
+void MainWindow::onShowConflicts() {
+    ConflictReportDialog dlg(this);
+    connect(&dlg, &ConflictReportDialog::groupRequested, this, [this](int groupId) {
+        showGroup(groupId);
+    });
+    dlg.exec();
+}
+
 void MainWindow::onBackupDatabase() {
     const QString defaultName = QString("schedule_backup_%1.db")
-    .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmm"));
+                                    .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmm"));
     const QString path = QFileDialog::getSaveFileName(this, "Резервна копія бази даних", defaultName,
                                                       "База SmartSchedule (*.db)");
     if (path.isEmpty()) return;
@@ -497,157 +663,11 @@ void MainWindow::onRestoreDatabase() {
 
     QString error;
     const bool ok = DatabaseManager::instance().restoreFrom(path, error);
-    loadGroups();
+    loadEntities(currentEntityId());
 
     if (ok) {
         QMessageBox::information(this, "Відновлення", "Базу даних успішно відновлено.");
     } else {
         QMessageBox::critical(this, "Помилка", error);
-    }
-}
-
-void MainWindow::onPrint() {
-    if (!ensureGroupSelected()) return;
-
-    QTextDocument doc;
-    doc.setHtml(buildScheduleHtml());
-
-    QPrinter printer(QPrinter::HighResolution);
-    printer.setPageOrientation(QPageLayout::Landscape);
-
-    QPrintPreviewDialog preview(&printer, this);
-    preview.resize(1000, 700);
-    connect(&preview, &QPrintPreviewDialog::paintRequested, this, [&doc](QPrinter *p) {
-        doc.print(p);
-    });
-    preview.exec();
-}
-
-void MainWindow::refreshScheduleTable() {
-    m_tableWidget->clearContents();
-
-    m_bells = DatabaseManager::instance().getBellSchedule();
-    m_tableWidget->setRowCount(m_bells.size());
-
-    m_pairHeaders.clear();
-    for (const auto &b : m_bells) {
-        m_pairHeaders.append(QString("%1 пара").arg(b.pairNumber) + kNewLine + QString("%1 - %2").arg(b.startTime, b.endTime));
-    }
-    updateHighlight();
-
-    m_delegate->windows.clear();
-    m_windowsLabel->clear();
-
-    const int groupId = m_groupCombo->currentData().toInt();
-    if (groupId <= 0) return;
-
-    const int weekFilter = m_weekFilterCombo->currentData().toInt();
-    const auto schedule = DatabaseManager::instance().getScheduleForGroup(groupId, weekFilter);
-
-    if (m_windowsCheck->isChecked()) {
-        const auto windows = ScheduleAnalyzer::findWindows(schedule, weekFilter);
-        for (const auto &w : windows) {
-            m_delegate->windows.insert(WindowsDelegate::key(w.pair - 1, w.day - 1));
-        }
-        m_windowsLabel->setText(QString("Вікон: %1").arg(windows.size()));
-        m_tableWidget->viewport()->update();
-    }
-
-    QMap<QPair<int, int>, QList<ScheduleRecord>> cellMap;
-    for (const auto &rec : schedule) {
-        cellMap[qMakePair(rec.pairNumber - 1, rec.dayOfWeek - 1)].append(rec);
-    }
-
-    const QString separator = QString(kNewLine) + "-----------------" + kNewLine;
-
-    for (auto it = cellMap.constBegin(); it != cellMap.constEnd(); ++it) {
-        const int row = it.key().first;
-        const int col = it.key().second;
-        const auto &records = it.value();
-
-        if (row < 0 || row >= m_bells.size() || col < 0 || col >= DaysCount) continue;
-
-        QStringList lines, labels;
-        QVariantList ids;
-        for (const auto &rec : records) {
-            const QString prefix = rec.weekType > 0 ? QString("[%1 тижд] ").arg(rec.weekType) : QString();
-            const QString title = prefix + rec.subjectName;
-            lines << title + kNewLine + QString("Викл: %1 | Ауд: %2").arg(rec.teacherName, rec.roomNumber);
-            labels << QString("%1 — %2, ауд. %3").arg(title, rec.teacherName, rec.roomNumber);
-            ids << rec.id;
-        }
-
-        auto *item = new QTableWidgetItem(lines.join(separator));
-        item->setTextAlignment(Qt::AlignCenter);
-
-        QColor bgColor = records.size() > 1 ? QColor("#E3F2FD") : QColor(records.first().colorHex);
-        if (!bgColor.isValid()) bgColor = QColor("#4CAF50");
-
-        item->setBackground(bgColor);
-        item->setForeground(bgColor.lightness() < 128 ? Qt::white : Qt::black);
-        item->setData(IdsRole, ids);
-        item->setData(LabelsRole, labels);
-
-        m_tableWidget->setItem(row, col, item);
-    }
-}
-
-void MainWindow::onAddEntryClicked() {
-    if (!ensureGroupSelected()) return;
-
-    AddEntryDialog dlg(m_groupCombo->currentData().toInt(), this);
-    if (dlg.exec() == QDialog::Accepted) {
-        refreshScheduleTable();
-    }
-}
-
-int MainWindow::pickRecordId(const QTableWidgetItem *item, const QString &title, const QString &prompt) {
-    const QVariantList ids = item->data(IdsRole).toList();
-    if (ids.isEmpty()) return 0;
-    if (ids.size() == 1) return ids.first().toInt();
-
-    const QStringList labels = item->data(LabelsRole).toStringList();
-    bool ok = false;
-    const QString chosen = QInputDialog::getItem(this, title, prompt, labels, 0, false, &ok);
-    if (!ok) return 0;
-    return ids.at(qMax(0, labels.indexOf(chosen))).toInt();
-}
-
-void MainWindow::onCellDoubleClicked(int row, int column) {
-    const int groupId = m_groupCombo->currentData().toInt();
-    if (groupId <= 0) return;
-
-    int recordId = 0;
-    if (const auto *item = m_tableWidget->item(row, column)) {
-        recordId = pickRecordId(item, "Редагування", "Оберіть заняття для редагування:");
-        if (recordId <= 0) return;
-    }
-
-    const int pairNumber = row < m_bells.size() ? m_bells[row].pairNumber : 0;
-    AddEntryDialog dlg(groupId, this, recordId, column + 1, pairNumber);
-    if (dlg.exec() == QDialog::Accepted) {
-        refreshScheduleTable();
-    }
-}
-
-void MainWindow::onDeleteEntryClicked() {
-    const auto *item = m_tableWidget->currentItem();
-    if (!item) {
-        QMessageBox::information(this, "Видалення", "Будь ласка, оберіть комірку розкладу для видалення.");
-        return;
-    }
-
-    const int recordId = pickRecordId(item, "Видалення", "Оберіть заняття для видалення:");
-    if (recordId <= 0) return;
-
-    const auto answer = QMessageBox::question(this, "Підтвердження",
-                                              "Ви дійсно бажаєте видалити обране заняття з розкладу?",
-                                              QMessageBox::Yes | QMessageBox::No);
-    if (answer != QMessageBox::Yes) return;
-
-    if (DatabaseManager::instance().deleteScheduleRecord(recordId)) {
-        refreshScheduleTable();
-    } else {
-        QMessageBox::critical(this, "Помилка", "Не вдалося видалити заняття.");
     }
 }

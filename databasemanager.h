@@ -97,7 +97,15 @@ public:
     bool getScheduleRecord(int recordId, ScheduleRecord &outRecord);
     QList<ScheduleRecord> getScheduleForGroup(int groupId, int weekType = 0);
     QList<ScheduleRecord> getScheduleForTeacher(int teacherId, int weekType = 0);
+    QList<ScheduleRecord> getScheduleForClassroom(int classroomId, int weekType = 0);
+    QList<ScheduleRecord> getScheduleForEntity(Entity entity, int id, int weekType = 0);
+    QList<ScheduleRecord> getAllScheduleRecords();
     bool deleteScheduleRecord(int recordId);
+    bool deleteScheduleForGroup(int groupId);
+
+    bool beginTransaction();
+    bool commitTransaction();
+    void rollbackTransaction();
 
     bool backupTo(const QString &path, QString &outErrorMessage);
     bool restoreFrom(const QString &path, QString &outErrorMessage);
@@ -114,6 +122,7 @@ private:
                  const QString &duplicateMessage, QString &outErrorMessage);
     QString findConflict(const ScheduleRecord &record);
     bool isValidBackup(const QString &path);
+    QList<ScheduleRecord> loadSchedule(const QString &filterColumn, int filterId, int weekType);
 
     QSqlDatabase m_db;
     QString m_dbPath;
