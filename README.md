@@ -66,7 +66,7 @@
 ## Збірка з вихідного коду
 
 **Потрібно:** Qt 6.5+ (перевірено на 6.12), CMake 3.19+, компілятор з підтримкою C++17,
-`git` та інтернет при першому налаштуванні (завантажується бібліотека QXlsx).
+`git` та інтернет при першому налаштуванні (завантажується бібліотека QXlsx; без мережі покладіть її копію в `QXlsx/` поруч із `CMakeLists.txt`).
 
 **Qt Creator:** відкрийте `CMakeLists.txt`, оберіть комплект і натисніть **Ctrl+B**.
 
@@ -86,6 +86,24 @@ cmake --build build --parallel
 3. Запустіть `deploy/deploy_windows.bat`.
 
 Результат: `build-release/SmartSchedule-<версія>-Windows.zip` та `.exe`; портативна версія лежить у теці `dist/bin`.
+
+## Тестування
+
+Автотести (Qt Test) перевіряють БД, перевірку конфліктів, транзакції, імпорт, резервну копію та аналізатор розкладу. Кожен тест працює на чистій тимчасовій базі.
+
+```bash
+cmake -S . -B build -DSMARTSCHEDULE_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH=<шлях до Qt>
+cmake --build build --target tst_smartschedule
+ctest --test-dir build --output-on-failure
+```
+
+Протокол із очікуваними й фактичними результатами: [docs/test-protocol.md](docs/test-protocol.md).
+
+## Схема бази даних
+
+Повний SQL-скрипт: [db/schema.sql](db/schema.sql). Його можна виконати в будь-якому клієнті SQLite для створення чистої бази. Програма створює ту саму схему автоматично. Таблиці: `groups`, `teachers`, `classrooms`, `subjects`, `bells`, `schedule` (зовнішні ключі з каскадним видаленням, `CHECK` на день, пару, тиждень і місткість, унікальні індекси на назви та клітинку розкладу).
+
+Щоб відновити чисті навчальні дані, закрийте програму й видаліть `schedule.db` з каталогу даних (див. нижче) або відновіть резервну копію через меню.
 
 ## Формат імпорту розкладу
 
@@ -123,6 +141,9 @@ SmartSchedule/
 ├── schedulehtml.*           # HTML для PDF та друку
 ├── csvutils.h, tablefile.h  # CSV та Excel
 ├── theme.*                  # теми оформлення
+├── db/schema.sql            # схема бази даних
+├── tests/                   # автотести Qt Test
+├── docs/test-protocol.md    # протокол тестування
 ├── cmake/Packaging.cmake    # CPack (NSIS, ZIP)
 └── deploy/deploy_windows.bat
 ```

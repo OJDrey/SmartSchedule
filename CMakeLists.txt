@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.19)
-project(SmartSchedule VERSION 1.5.0 LANGUAGES CXX)
+project(SmartSchedule VERSION 1.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,6 +62,10 @@ qt_add_executable(SmartSchedule
     ${QXLSX_HEADERS}
 )
 
+if(MINGW)
+    set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> <DEFINES> -O coff <FLAGS> <SOURCE> <OBJECT>")
+endif()
+
 if(WIN32 AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/app.ico)
     target_sources(SmartSchedule PRIVATE app.rc)
 endif()
@@ -92,3 +96,18 @@ qt_generate_deploy_app_script(
 install(SCRIPT ${deploy_script})
 
 include(cmake/Packaging.cmake)
+
+option(SMARTSCHEDULE_BUILD_TESTS "Build unit tests" OFF)
+if(SMARTSCHEDULE_BUILD_TESTS)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+    enable_testing()
+    qt_add_executable(tst_smartschedule
+        tests/tst_smartschedule.cpp
+        databasemanager.h databasemanager.cpp
+        scheduleimporter.h scheduleimporter.cpp
+        scheduleanalysis.h schedulefilter.h
+    )
+    target_include_directories(tst_smartschedule PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(tst_smartschedule PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Sql Qt6::Test)
+    add_test(NAME tst_smartschedule COMMAND tst_smartschedule)
+endif()

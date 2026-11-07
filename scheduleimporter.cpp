@@ -110,14 +110,18 @@ void ScheduleImporter::resolveReferences(QList<ImportRow> &rows) {
     }
 }
 
-ImportReport ScheduleImporter::run(QList<ImportRow> &rows, bool replaceGroups, bool createMissing) {
+ImportReport ScheduleImporter::run(QList<ImportRow> &rows, const ImportOptions &options) {
     auto &db = DatabaseManager::instance();
     ImportReport report;
 
     resolveReferences(rows);
-    db.beginTransaction();
+    if (!db.beginTransaction()) {
+        report.total = rows.size();
+        report.errors << "Не вдалося почати транзакцію в базі даних.";
+        return report;
+    }
 
-    if (createMissing) {
+    if (options.createMissing) {
         QSet<QString> created;
         auto once = [&created](const QString &key) {
             if (created.contains(key)) return false;
@@ -125,28 +129,37 @@ ImportReport ScheduleImporter::run(QList<ImportRow> &rows, bool replaceGroups, b
             return true;
         };
 
-        QString ignored;
+        auto note = [&report](bool ok, const QString &label, const QString &name, const QString &error) {
+            if (!ok) report.errors << QString("Не вдалося створити %1 «%2»: %3").arg(label, name, error);
+        };
+        QString error;
         for (const auto &row : rows) {
             if (!row.error.isEmpty()) continue;
             if (row.record.groupId == 0 && once("g:" + normalize(row.groupName)))
-                db.saveGroup(0, row.groupName, ignored);
+                note(db.saveGroup(0, row.groupName, error), "групу", row.groupName, error);
             if (row.record.teacherId == 0 && once("t:" + normalize(row.teacherName)))
-                db.saveTeacher(0, row.teacherName, QString(), ignored);
+                note(db.saveTeacher(0, row.teacherName, QString(), error), "викладача", row.teacherName, error);
             if (row.record.subjectId == 0 && once("s:" + normalize(row.subjectName)))
-                db.saveSubject(0, row.subjectName, "#4CAF50", ignored);
+                note(db.saveSubject(0, row.subjectName, "#4CAF50", error), "предмет", row.subjectName, error);
             if (row.record.classroomId == 0 && once("c:" + normalize(row.roomName)))
-                db.saveClassroom(0, row.roomName, 30, ignored);
+                note(db.saveClassroom(0, row.roomName, 30, error), "аудиторію", row.roomName, error);
         }
         resolveReferences(rows);
     }
 
-    if (replaceGroups) {
+    if (options.replaceGroups) {
         QSet<int> groupIds;
         for (const auto &row : rows) {
             if (row.error.isEmpty() && row.missing.isEmpty()) groupIds.insert(row.record.groupId);
         }
         for (int id : groupIds) {
-            db.deleteScheduleForGroup(id);
+            if (!db.deleteScheduleForGroup(id)) {
+                db.rollbackTransaction();
+                report.total = rows.size();
+                report.imported = 0;
+                report.errors << "Не вдалося очистити старий розклад групи; імпорт скасовано, зміни не збережено.";
+                return report;
+            }
         }
     }
 

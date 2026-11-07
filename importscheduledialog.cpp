@@ -125,7 +125,10 @@ void ImportScheduleDialog::onImportClicked() {
         if (answer != QMessageBox::Yes) return;
     }
 
-    const ImportReport report = ScheduleImporter::run(m_rows, m_replaceCheck->isChecked(), m_createCheck->isChecked());
+    ImportOptions options;
+    options.replaceGroups = m_replaceCheck->isChecked();
+    options.createMissing = m_createCheck->isChecked();
+    const ImportReport report = ScheduleImporter::run(m_rows, options);
 
     QString text = QString("Імпортовано пар: %1 з %2.").arg(report.imported).arg(report.total);
     if (!report.errors.isEmpty()) {

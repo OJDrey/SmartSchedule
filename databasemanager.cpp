@@ -43,7 +43,12 @@ bool DatabaseManager::connectToDatabase(const QString &dbPath) {
         return false;
     }
 
-    QSqlQuery(m_db).exec("PRAGMA foreign_keys = ON;");
+    QSqlQuery pragma(m_db);
+    if (!pragma.exec("PRAGMA foreign_keys = ON;") || !pragma.exec("PRAGMA foreign_keys;")
+        || !pragma.next() || pragma.value(0).toInt() != 1) {
+        qDebug() << "Не вдалося ввімкнути контроль зовнішніх ключів";
+        return false;
+    }
     return createTables() && seedInitialData();
 }
 
@@ -59,18 +64,18 @@ bool DatabaseManager::createTables() {
     const QStringList statements = {
         R"(CREATE TABLE IF NOT EXISTS groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE);)",
+            name TEXT NOT NULL UNIQUE CHECK(length(trim(name)) BETWEEN 1 AND 50));)",
         R"(CREATE TABLE IF NOT EXISTS teachers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT NOT NULL,
+            full_name TEXT NOT NULL CHECK(length(trim(full_name)) BETWEEN 1 AND 100),
             department TEXT);)",
         R"(CREATE TABLE IF NOT EXISTS classrooms (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             room_number TEXT NOT NULL UNIQUE,
-            capacity INTEGER DEFAULT 30);)",
+            capacity INTEGER NOT NULL DEFAULT 30 CHECK(capacity > 0));)",
         R"(CREATE TABLE IF NOT EXISTS subjects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+            name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 100),
             color_hex TEXT DEFAULT '#4CAF50');)",
         R"(CREATE TABLE IF NOT EXISTS bells (
             pair_number INTEGER PRIMARY KEY,
@@ -102,12 +107,22 @@ bool DatabaseManager::createTables() {
             return false;
         }
     }
+
+    const QStringList uniqueIndexes = {
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_teachers_name ON teachers(full_name);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_subjects_name ON subjects(name);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_schedule_cell ON schedule(group_id, day_of_week, pair_number, week_type);"
+    };
+    for (const QString &sql : uniqueIndexes) {
+        if (!query.exec(sql))
+            qDebug() << "Унікальний індекс не створено (у базі є дублікати):" << query.lastError().text();
+    }
     return true;
 }
 
 bool DatabaseManager::seedInitialData() {
     QSqlQuery query(m_db);
-    m_db.transaction();
+    if (!m_db.transaction()) return false;
 
     query.exec("SELECT COUNT(*) FROM groups;");
     if (query.next() && query.value(0).toInt() == 0) {
@@ -317,7 +332,10 @@ bool DatabaseManager::updateBellSchedule(const QList<BellItem> &bells, QString &
         return false;
     }
 
-    m_db.transaction();
+    if (!m_db.transaction()) {
+        outErrorMessage = m_db.lastError().text();
+        return false;
+    }
     if (!query.exec("DELETE FROM bells;")) {
         outErrorMessage = query.lastError().text();
         m_db.rollback();
@@ -559,22 +577,29 @@ bool DatabaseManager::backupTo(const QString &path, QString &outErrorMessage) {
         return false;
     }
 
-    QFile::remove(path);
+    const QString tempPath = path + ".tmp";
+    QFile::remove(tempPath);
 
-    QString escaped = path;
+    QString escaped = tempPath;
     escaped.replace("'", "''");
     QSqlQuery query(m_db);
-    if (query.exec(QString("VACUUM INTO '%1';").arg(escaped))) {
-        return true;
-    }
-
+    bool created = query.exec(QString("VACUUM INTO '%1';").arg(escaped));
     const QString vacuumError = query.lastError().text();
-    if (QFile::copy(m_dbPath, path)) {
-        return true;
+    if (!created) created = QFile::copy(m_dbPath, tempPath);
+
+    if (!created) {
+        QFile::remove(tempPath);
+        outErrorMessage = "Не вдалося створити копію: " + vacuumError;
+        return false;
     }
 
-    outErrorMessage = "Не вдалося створити копію: " + vacuumError;
-    return false;
+    QFile::remove(path);
+    if (!QFile::rename(tempPath, path)) {
+        QFile::remove(tempPath);
+        outErrorMessage = "Не вдалося записати файл копії: " + path;
+        return false;
+    }
+    return true;
 }
 
 bool DatabaseManager::isValidBackup(const QString &path) {

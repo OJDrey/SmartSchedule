@@ -23,13 +23,18 @@ struct ImportReport {
     QStringList errors;
 };
 
+struct ImportOptions {
+    bool replaceGroups = false;
+    bool createMissing = false;
+};
+
 class ScheduleImporter {
 public:
     static QStringList header();
     static QList<QStringList> toRows(const QList<ScheduleRecord> &records);
     static QList<ImportRow> parse(const QList<QStringList> &rows);
     static void resolveReferences(QList<ImportRow> &rows);
-    static ImportReport run(QList<ImportRow> &rows, bool replaceGroups, bool createMissing);
+    static ImportReport run(QList<ImportRow> &rows, const ImportOptions &options);
 };
 
 #endif // SCHEDULEIMPORTER_H
