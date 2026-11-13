@@ -9,4 +9,4 @@ void save(Theme theme);
 void apply(Theme theme);
 }
 
-#endif // THEME_H
+#endif 
