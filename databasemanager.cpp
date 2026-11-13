@@ -49,7 +49,8 @@ bool DatabaseManager::connectToDatabase(const QString &dbPath) {
         qDebug() << "Не вдалося ввімкнути контроль зовнішніх ключів";
         return false;
     }
-    return createTables() && seedInitialData();
+    const bool freshDatabase = m_db.tables().isEmpty();
+    return createTables() && seedInitialData(freshDatabase);
 }
 
 void DatabaseManager::closeDatabase() {
@@ -120,12 +121,11 @@ bool DatabaseManager::createTables() {
     return true;
 }
 
-bool DatabaseManager::seedInitialData() {
+bool DatabaseManager::seedInitialData(bool withDemoData) {
     QSqlQuery query(m_db);
     if (!m_db.transaction()) return false;
 
-    query.exec("SELECT COUNT(*) FROM groups;");
-    if (query.next() && query.value(0).toInt() == 0) {
+    if (withDemoData) {
         const QStringList seed = {
             "INSERT INTO groups (name) VALUES ('КІ-106'), ('КН-223'), ('КІ-405');",
             "INSERT INTO teachers (full_name, department) VALUES ('Марцюк О. В.', 'Системного програмування'), ('Геник М. С.', 'Інформатики');",

@@ -243,6 +243,15 @@ private slots:
         QVERIFY2(db.restoreFrom(bak, err), qPrintable(err));
         QCOMPARE(count("SELECT COUNT(*) FROM schedule"), 1);
     }
+    void T24_reopenAfterDeletingAllGroups() {
+        QString err;
+        for (const auto &g : db.getGroups()) QVERIFY2(db.deleteEntity(Entity::Group, g.id, err), qPrintable(err));
+        db.closeDatabase();
+        QVERIFY(db.connectToDatabase(m_path));
+        QCOMPARE(db.getGroups().size(), 0);
+        QCOMPARE(db.getTeachers().size(), 2);
+        QCOMPARE(db.getBellSchedule().size(), 5);
+    }
 };
 
 QTEST_GUILESS_MAIN(TstSmartSchedule)

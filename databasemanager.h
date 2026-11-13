@@ -117,7 +117,7 @@ private:
     DatabaseManager& operator=(const DatabaseManager&) = delete;
 
     bool createTables();
-    bool seedInitialData();
+    bool seedInitialData(bool withDemoData);
     bool runSave(int id, const QString &insertSql, const QString &updateSql, const QVariantMap &values,
                  const QString &duplicateMessage, QString &outErrorMessage);
     QString findConflict(const ScheduleRecord &record);

@@ -1,5 +1,5 @@
 #include "schedulehtml.h"
-#include <QFile>
+#include <QSaveFile>
 #include <QMap>
 #include <QPair>
 #include <QPdfWriter>
@@ -67,8 +67,10 @@ QString ScheduleHtml::document(const QStringList &pages) {
 }
 
 bool ScheduleHtml::savePdf(const QString &html, const QString &path) {
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) return false;
     {
-        QPdfWriter writer(path);
+        QPdfWriter writer(&file);
         writer.setPageSize(QPageSize(QPageSize::A4));
         writer.setPageOrientation(QPageLayout::Landscape);
         writer.setPageMargins(QMarginsF(10, 10, 10, 10), QPageLayout::Millimeter);
@@ -77,7 +79,7 @@ bool ScheduleHtml::savePdf(const QString &html, const QString &path) {
         doc.setHtml(html);
         doc.print(&writer);
     }
-    return QFile::exists(path);
+    return file.commit();
 }
 
 void ScheduleHtml::print(const QString &html, QPrinter *printer) {
